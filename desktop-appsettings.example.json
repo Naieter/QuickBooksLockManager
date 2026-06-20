@@ -1,0 +1,26 @@
+{
+  "LockServiceBaseUrl": "http://LOCK-SERVER-HOSTNAME:5100",
+  "ApiKey": "CHANGE-ME-same-as-server-ApiKey",
+  "AdminApiKey": "",
+  "IsAdminMode": false,
+
+  "QuickBooksExePath": "C:\\Program Files\\Intuit\\QuickBooks Enterprise Solutions 24.0\\QBW32.EXE",
+  "MultiFileMode": false,
+
+  "WatchedFolders": [
+    {
+      "Path": "C:\\Users\\USERNAME\\OneDrive\\CompanyFiles",
+      "Recursive": false,
+      "Label": "Main QuickBooks Files"
+    }
+  ],
+
+  "SharedRootPath": "C:\\Users\\USERNAME\\OneDrive\\CompanyFiles",
+
+  "UserName": "firstname.lastname",
+  "DisplayName": "First Last",
+  "Email": "user@company.com",
+
+  "HeartbeatIntervalSeconds": 20,
+  "ServiceTimeoutSeconds": 10
+}

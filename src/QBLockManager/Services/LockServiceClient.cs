@@ -1,0 +1,155 @@
+using System.Net.Http;
+using System.Net.Http.Json;
+using QBLockManager.Models;
+
+namespace QBLockManager.Services;
+
+public class AcquireResult
+{
+    public bool Success { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? Message { get; set; }
+    public LockInfoDto? Lock { get; set; }
+    public LockInfoDto? CurrentHolder { get; set; }
+}
+
+public class LockServiceClient
+{
+    private readonly HttpClient _http;
+    private readonly string _adminApiKey;
+
+    public LockServiceClient(string baseUrl, string apiKey, string adminApiKey, int timeoutSeconds = 10)
+    {
+        _adminApiKey = adminApiKey;
+        _http = new HttpClient
+        {
+            BaseAddress = new Uri(NormalizeUrl(baseUrl)),
+            Timeout = TimeSpan.FromSeconds(timeoutSeconds)
+        };
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            _http.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
+    }
+
+    private static string NormalizeUrl(string url)
+    {
+        url = url.Trim().TrimEnd('/');
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            url = "http://" + url;
+        return url + "/";
+    }
+
+    public async Task<bool> IsReachableAsync()
+    {
+        try
+        {
+            // Use an authenticated endpoint so a wrong API key shows as unreachable
+            // rather than falsely appearing connected. /health skips auth.
+            var resp = await _http.GetAsync("api/files/locks");
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<List<LockInfoDto>> GetAllLocksAsync()
+    {
+        var resp = await _http.GetAsync("api/files/locks");
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<LockInfoDto>>() ?? new();
+    }
+
+    public async Task<List<LockInfoDto>> GetMyLocksAsync(string appInstanceId)
+    {
+        var resp = await _http.GetAsync($"api/locks/mine?appInstanceId={Uri.EscapeDataString(appInstanceId)}");
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<LockInfoDto>>() ?? new();
+    }
+
+    public async Task<AcquireResult> AcquireAsync(
+        string fileKey, string fileName, string localPath,
+        string userName, string? displayName, string? email,
+        string machineName, string appInstanceId)
+    {
+        var body = new
+        {
+            fileKey, fileName, localPath, userName, displayName, email, machineName, appInstanceId
+        };
+
+        var resp = await _http.PostAsJsonAsync("api/locks/acquire", body);
+
+        if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var denied = await resp.Content.ReadFromJsonAsync<AcquireResult>();
+            return denied ?? new AcquireResult { Success = false, Status = "Denied", Message = "Lock denied." };
+        }
+
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<AcquireResult>()
+               ?? new AcquireResult { Success = false, Status = "Error" };
+    }
+
+    public async Task<bool> HeartbeatAsync(string lockId, string appInstanceId)
+    {
+        try
+        {
+            var resp = await _http.PostAsJsonAsync("api/locks/heartbeat", new { lockId, appInstanceId });
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> ReleaseAsync(string lockId, string appInstanceId)
+    {
+        try
+        {
+            var resp = await _http.PostAsJsonAsync("api/locks/release", new { lockId, appInstanceId });
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<(bool Success, string Message)> ForceReleaseAsync(
+        string lockId, string adminUserName, string? reason)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "api/locks/force-release");
+        request.Headers.Add("X-Admin-Key", _adminApiKey);
+        request.Content = JsonContent.Create(new { lockId, adminUserName, reason });
+
+        var resp = await _http.SendAsync(request);
+        var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+        var msg = body?.GetValueOrDefault("message") ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
+        return (resp.IsSuccessStatusCode, msg);
+    }
+
+    public async Task<List<AuditLogEntryDto>> GetAuditLogAsync(int limit = 100, string? fileKey = null)
+    {
+        var url = $"api/audit?limit={limit}";
+        if (!string.IsNullOrEmpty(fileKey)) url += $"&fileKey={Uri.EscapeDataString(fileKey)}";
+        var resp = await _http.GetAsync(url);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<AuditLogEntryDto>>() ?? new();
+    }
+}
+
+public class AuditLogEntryDto
+{
+    public long AuditId { get; set; }
+    public DateTime TimestampUtc { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? FileKey { get; set; }
+    public string? FileName { get; set; }
+    public string? UserName { get; set; }
+    public string? MachineName { get; set; }
+    public string? LockId { get; set; }
+    public string? Details { get; set; }
+}

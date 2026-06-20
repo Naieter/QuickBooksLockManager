@@ -1,0 +1,324 @@
+<Window x:Class="QBLockManager.Views.SetupWizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="QuickBooks Lock Manager — First-Time Setup"
+        Width="600" Height="520"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#1E1E2E"
+        Closing="Window_Closing">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- Header -->
+            <RowDefinition Height="Auto"/>  <!-- Step dots -->
+            <RowDefinition Height="*"/>     <!-- Content -->
+            <RowDefinition Height="Auto"/>  <!-- Nav buttons -->
+        </Grid.RowDefinitions>
+
+        <!-- ── Header ── -->
+        <Border Grid.Row="0" Background="#2A2A3E" Padding="32,20,32,16">
+            <StackPanel>
+                <TextBlock x:Name="StepTitle" Text="Welcome"
+                           FontSize="22" FontWeight="Bold" Foreground="#E2E8F0"/>
+                <TextBlock x:Name="StepSubtitle" Text="Let's get your workstation set up."
+                           FontSize="13" Foreground="#94A3B8" Margin="0,4,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Step progress dots ── -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal"
+                    HorizontalAlignment="Center" Margin="0,14,0,4">
+            <Ellipse x:Name="Dot1" Width="10" Height="10" Fill="#6366F1" Margin="4,0"/>
+            <Ellipse x:Name="Dot2" Width="10" Height="10" Fill="#3F3F5C" Margin="4,0"/>
+            <Ellipse x:Name="Dot3" Width="10" Height="10" Fill="#3F3F5C" Margin="4,0"/>
+            <Ellipse x:Name="Dot4" Width="10" Height="10" Fill="#3F3F5C" Margin="4,0"/>
+            <Ellipse x:Name="Dot5" Width="10" Height="10" Fill="#3F3F5C" Margin="4,0"/>
+        </StackPanel>
+
+        <!-- ── Step content ── -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <Grid Margin="40,16,40,8">
+
+                <!-- Step 1: Welcome -->
+                <StackPanel x:Name="PanelStep1">
+                    <TextBlock TextWrapping="Wrap" FontSize="14" Foreground="#E2E8F0" LineHeight="22">
+                        This app is your front door to QuickBooks company files.
+                        <LineBreak/><LineBreak/>
+                        It makes sure only one person can open a QuickBooks file at a time,
+                        preventing accidental data overwrites.
+                        <LineBreak/><LineBreak/>
+                        Setup takes about <Run FontWeight="Bold">2 minutes</Run>.
+                        We'll ask you for 4 things:
+                    </TextBlock>
+
+                    <StackPanel Margin="16,16,0,0">
+                        <TextBlock Text="① The lock server address  (from your admin)" Foreground="#94A3B8" FontSize="13" Margin="0,6"/>
+                        <TextBlock Text="② Where your QuickBooks files are stored" Foreground="#94A3B8" FontSize="13" Margin="0,6"/>
+                        <TextBlock Text="③ Your name  (so others know who has a file open)" Foreground="#94A3B8" FontSize="13" Margin="0,6"/>
+                        <TextBlock Text="④ Where QuickBooks is installed  (we'll try to find it automatically)" Foreground="#94A3B8" FontSize="13" Margin="0,6"/>
+                    </StackPanel>
+
+                    <Border Background="#1E3A2E" BorderBrush="#22C55E" BorderThickness="0,0,0,0"
+                            CornerRadius="6" Padding="14,10" Margin="0,20,0,0">
+                        <TextBlock TextWrapping="Wrap" Foreground="#86EFAC" FontSize="12">
+                            <Run FontWeight="Bold">Important:</Run>
+                            <Run>Always open QuickBooks through this app — never directly from File Explorer or QuickBooks shortcuts.</Run>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+
+                <!-- Step 2: Lock Server -->
+                <StackPanel x:Name="PanelStep2" Visibility="Collapsed">
+                    <TextBlock Text="Your IT person or administrator has set up a Lock Server on your network."
+                               TextWrapping="Wrap" Foreground="#94A3B8" FontSize="13" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="Lock Server Address" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#E2E8F0" Margin="0,0,0,4"/>
+                    <TextBlock Text="Example: http://192.168.1.50:5100 or http://OFFICE-SERVER:5100"
+                               Foreground="#64748B" FontSize="11" Margin="0,0,0,6"/>
+                    <TextBox x:Name="TxtServerUrl" FontSize="14" Padding="10,8"
+                             Background="#2A2A3E" Foreground="#E2E8F0"
+                             BorderBrush="#3F3F5C" BorderThickness="1"/>
+
+                    <TextBlock Text="Access Key" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#E2E8F0" Margin="0,20,0,4"/>
+                    <TextBlock Text="A password for the lock server. Get this from your administrator."
+                               Foreground="#64748B" FontSize="11" Margin="0,0,0,6"/>
+                    <TextBox x:Name="TxtApiKey" FontSize="14" Padding="10,8"
+                             Background="#2A2A3E" Foreground="#E2E8F0"
+                             BorderBrush="#3F3F5C" BorderThickness="1"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button x:Name="BtnTestConnection" Content="Test Connection"
+                                Click="TestConnection_Click"
+                                Background="#374151" Foreground="White"
+                                Padding="14,8" BorderThickness="0" Cursor="Hand" FontSize="13">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                            Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <TextBlock x:Name="TxtConnectionResult" Foreground="#94A3B8"
+                                   VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Step 3: QuickBooks folder -->
+                <StackPanel x:Name="PanelStep3" Visibility="Collapsed">
+                    <TextBlock Text="Where are your QuickBooks company files stored on this computer?"
+                               TextWrapping="Wrap" Foreground="#94A3B8" FontSize="13" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="QuickBooks Files Folder" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#E2E8F0" Margin="0,0,0,6"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="TxtQBFolder" Grid.Column="0" FontSize="13" Padding="10,8"
+                                 Background="#2A2A3E" Foreground="#E2E8F0"
+                                 BorderBrush="#3F3F5C" BorderThickness="1"
+                                 IsReadOnly="True"/>
+                        <Button Grid.Column="1" Content="Browse…" Click="BrowseFolder_Click"
+                                Margin="8,0,0,0" Padding="14,8" FontSize="13" Cursor="Hand"
+                                Background="#374151" Foreground="White" BorderThickness="0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                            Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#4B5563"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </Grid>
+
+                    <!-- Found files preview -->
+                    <StackPanel x:Name="PanelFoundFiles" Visibility="Collapsed" Margin="0,16,0,0">
+                        <TextBlock x:Name="TxtFoundCount" Foreground="#22C55E" FontSize="13"
+                                   FontWeight="SemiBold" Margin="0,0,0,6"/>
+                        <Border Background="#2A2A3E" BorderBrush="#3F3F5C" BorderThickness="1"
+                                CornerRadius="4" Padding="10,8" MaxHeight="100">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl x:Name="FoundFilesList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" Foreground="#94A3B8"
+                                                       FontSize="12" Margin="0,2"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+                    </StackPanel>
+
+                    <TextBlock x:Name="TxtNoFiles" Visibility="Collapsed" Margin="0,12,0,0"
+                               Foreground="#F59E0B" FontSize="12" TextWrapping="Wrap"
+                               Text="No .QBW files found in that folder. Make sure you've selected the correct folder where your QuickBooks company files are stored."/>
+
+                    <CheckBox x:Name="ChkRecursive" Content="Also search inside subfolders"
+                              Foreground="#94A3B8" FontSize="12" Margin="0,14,0,0"
+                              Checked="ChkRecursive_Changed" Unchecked="ChkRecursive_Changed"/>
+                </StackPanel>
+
+                <!-- Step 4: Your name -->
+                <StackPanel x:Name="PanelStep4" Visibility="Collapsed">
+                    <TextBlock Text="When you lock a QuickBooks file, other users see your name so they know who has it open."
+                               TextWrapping="Wrap" Foreground="#94A3B8" FontSize="13" Margin="0,0,0,20"/>
+
+                    <TextBlock Text="Your Full Name" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#E2E8F0" Margin="0,0,0,6"/>
+                    <TextBox x:Name="TxtDisplayName" FontSize="14" Padding="10,8"
+                             Background="#2A2A3E" Foreground="#E2E8F0"
+                             BorderBrush="#3F3F5C" BorderThickness="1"/>
+
+                    <TextBlock Text="Your Email  (optional — shown to other users if they need to contact you)"
+                               FontSize="13" FontWeight="SemiBold" Foreground="#E2E8F0" Margin="0,20,0,6"/>
+                    <TextBox x:Name="TxtEmail" FontSize="14" Padding="10,8"
+                             Background="#2A2A3E" Foreground="#E2E8F0"
+                             BorderBrush="#3F3F5C" BorderThickness="1"/>
+                </StackPanel>
+
+                <!-- Step 5: QuickBooks path -->
+                <StackPanel x:Name="PanelStep5" Visibility="Collapsed">
+                    <TextBlock x:Name="TxtQBDetectStatus" TextWrapping="Wrap"
+                               Foreground="#94A3B8" FontSize="13" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="QuickBooks Program Location" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#E2E8F0" Margin="0,0,0,6"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="TxtQBExePath" Grid.Column="0" FontSize="12" Padding="10,8"
+                                 Background="#2A2A3E" Foreground="#E2E8F0"
+                                 BorderBrush="#3F3F5C" BorderThickness="1"/>
+                        <Button Grid.Column="1" Content="Browse…" Click="BrowseQBExe_Click"
+                                Margin="8,0,0,0" Padding="14,8" FontSize="13" Cursor="Hand"
+                                Background="#374151" Foreground="White" BorderThickness="0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                            Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#4B5563"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </Grid>
+
+                    <Border x:Name="PanelQBNotFound" Visibility="Collapsed" Margin="0,14,0,0"
+                            Background="#3B2A1E" BorderBrush="#F59E0B" BorderThickness="0,0,0,0"
+                            CornerRadius="6" Padding="14,10">
+                        <TextBlock TextWrapping="Wrap" Foreground="#FCD34D" FontSize="12">
+                            QuickBooks wasn't found automatically.
+                            Use the Browse button to locate
+                            <Run FontWeight="Bold">QBW32.EXE</Run>
+                            in your QuickBooks installation folder.
+                            It's usually in
+                            <Run FontStyle="Italic">C:\Program Files\Intuit\QuickBooks Enterprise Solutions XX.0\</Run>
+                        </TextBlock>
+                    </Border>
+
+                    <!-- All set summary -->
+                    <Border x:Name="PanelAllSet" Visibility="Collapsed" Margin="0,20,0,0"
+                            Background="#1E3A2E" CornerRadius="6" Padding="16,12">
+                        <StackPanel>
+                            <TextBlock Text="✓ You're all set!" Foreground="#22C55E"
+                                       FontSize="16" FontWeight="Bold" Margin="0,0,0,8"/>
+                            <TextBlock x:Name="TxtSummaryServer" Foreground="#86EFAC" FontSize="12" Margin="0,2"/>
+                            <TextBlock x:Name="TxtSummaryFolder" Foreground="#86EFAC" FontSize="12" Margin="0,2"/>
+                            <TextBlock x:Name="TxtSummaryName"   Foreground="#86EFAC" FontSize="12" Margin="0,2"/>
+                            <TextBlock x:Name="TxtSummaryQB"     Foreground="#86EFAC" FontSize="12" Margin="0,2"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+
+        <!-- ── Nav buttons ── -->
+        <Border Grid.Row="3" Background="#2A2A3E" BorderBrush="#3F3F5C" BorderThickness="0,1,0,0"
+                Padding="32,12">
+            <Grid>
+                <Button x:Name="BtnBack" Content="← Back" Click="Back_Click"
+                        HorizontalAlignment="Left" Padding="18,9" FontSize="13"
+                        Background="#374151" Foreground="#E2E8F0" BorderThickness="0"
+                        Cursor="Hand" Visibility="Collapsed">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#4B5563"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BtnNext" Content="Next →" Click="Next_Click"
+                            Padding="24,9" FontSize="13" Cursor="Hand"
+                            Background="#6366F1" Foreground="White" BorderThickness="0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                        Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#4F46E5"/>
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Opacity" Value="0.45"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <Button x:Name="BtnFinish" Content="Open Lock Manager" Click="Finish_Click"
+                            Visibility="Collapsed" Margin="10,0,0,0"
+                            Padding="24,9" FontSize="13" Cursor="Hand"
+                            Background="#22C55E" Foreground="White" BorderThickness="0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                                        Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#16A34A"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+    </Grid>
+</Window>

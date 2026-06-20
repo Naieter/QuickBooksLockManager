@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+release/
+
+# .NET
+*.user
+*.suo
+.vs/
+*.pdb
+
+# Secrets / local config
+keys.tmp
+appsettings.local.json
+appsettings.Development.json
+**/appsettings.json
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
