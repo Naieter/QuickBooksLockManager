@@ -119,32 +119,6 @@ Even on a true network share (no sync delay), file creation is not atomic across
 
 ---
 
-## Recommendation: QuickBooks Native Multi-User / Database Server Manager
-
-**If your environment supports it, QuickBooks Database Server Manager (QBDBSM) is the better long-term solution.**
-
-QuickBooks Desktop Enterprise includes a multi-user mode:
-
-- One machine runs **QuickBooks Database Server Manager**, which hosts the `.QBW` file.
-- All other workstations connect to the host over the LAN in multi-user mode.
-- QuickBooks itself handles record-level locking.
-- No sync, no conflict, no lock manager needed.
-
-**When to prefer QBDBSM:**
-- You have a dedicated always-on server or workstation on your LAN.
-- All users are on the same LAN or reliable VPN.
-- You are willing to move the authoritative `.QBW` file to the host machine (not a synced folder).
-
-**When this lock manager is the right tool:**
-- Files must live in a cloud-synced folder (OneDrive, Dropbox, ShareFile, etc.).
-- Remote workers use local copies that sync to the cloud.
-- A dedicated QB host machine is not practical.
-- You want an additional guardrail even if you also run QBDBSM.
-
-**Recommendation:** Evaluate whether you can move to QBDBSM. If you can, do it — it is Intuit's supported multi-user solution. Use this lock manager as a transition tool or as a guardrail in sync-only environments where QBDBSM is not feasible.
-
----
-
 ## Setup Instructions
 
 ### Prerequisites
