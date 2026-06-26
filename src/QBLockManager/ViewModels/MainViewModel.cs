@@ -396,7 +396,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var holder = SelectedFile.CurrentLock;
         var warn = MessageBox.Show(
-            $"WARNING: Force-unlocking this file does NOT close it in QuickBooks.\n\n{holder.UserName} on {holder.MachineName} may still have the file open. If they save, it will overwrite any changes made after this force unlock.\n\nVerify with {holder.UserName} that they are done before proceeding.\n\nContinue with force unlock?",
+            $"This will release the lock and close QuickBooks on {holder.MachineName}.\n\n{holder.UserName} has up to 20 seconds to save before QuickBooks closes. Any unsaved changes will be lost.\n\nContinue with force unlock?",
             "Force Unlock — Admin Action", MessageBoxButton.YesNo, MessageBoxImage.Warning);
 
         if (warn != MessageBoxResult.Yes) return;
