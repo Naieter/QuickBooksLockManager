@@ -128,7 +128,6 @@ using (var scope = app.Services.CreateScope())
 
 // Middleware
 app.UseMiddleware<ApiKeyMiddleware>();
-app.UseMiddleware<AdminApiKeyMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -206,7 +205,7 @@ app.MapPost("/api/locks/release", async (ReleaseLockRequest req, ILockService sv
 .WithName("ReleaseLock")
 .WithSummary("Releases a lock owned by the caller.");
 
-// POST /api/locks/force-release  (admin only — AdminApiKeyMiddleware enforces X-Admin-Key)
+// POST /api/locks/force-release
 app.MapPost("/api/locks/force-release", async (ForceReleaseRequest req, ILockService svc) =>
 {
     if (string.IsNullOrWhiteSpace(req.LockId) || string.IsNullOrWhiteSpace(req.AdminUserName))

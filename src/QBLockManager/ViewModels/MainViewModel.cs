@@ -25,7 +25,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _filterText = string.Empty;
     [ObservableProperty] private CompanyFileViewModel? _selectedFile;
     [ObservableProperty] private ActiveLockViewModel? _selectedActiveLock;
-    [ObservableProperty] private bool _isAdminMode;
     [ObservableProperty] private bool _isBusy;
     public bool IsShuttingDown { get; private set; }
 
@@ -47,12 +46,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _settings = settings;
         _appInstanceId = Guid.NewGuid().ToString("N")[..16];
-        _isAdminMode = settings.IsAdminMode;
-
         _lockClient = new LockServiceClient(
             settings.LockServiceBaseUrl,
             settings.ApiKey,
-            settings.AdminApiKey,
             settings.ServiceTimeoutSeconds);
 
         _scanner = new FileScanner();
@@ -386,13 +382,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task AdminForceUnlockAsync()
     {
         if (SelectedFile?.CurrentLock == null) return;
-
-        if (string.IsNullOrWhiteSpace(_settings.AdminApiKey))
-        {
-            MessageBox.Show("Admin API key is not configured.", "Admin Required",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
 
         var holder = SelectedFile.CurrentLock;
         var warn = MessageBox.Show(

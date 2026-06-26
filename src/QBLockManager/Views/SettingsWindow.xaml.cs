@@ -20,8 +20,6 @@ public partial class SettingsWindow : Window
     {
         ServiceUrl.Text = _settings.LockServiceBaseUrl;
         ApiKey.Text = _settings.ApiKey;
-        AdminApiKey.Text = _settings.AdminApiKey;
-        AdminMode.IsChecked = _settings.IsAdminMode;
         QBPath.Text = _settings.QuickBooksExePath;
         MultiFile.IsChecked = _settings.MultiFileMode;
         QBPassword.Password = _settings.QuickBooksPassword ?? "";
@@ -41,8 +39,6 @@ public partial class SettingsWindow : Window
     {
         _settings.LockServiceBaseUrl = ServiceUrl.Text.Trim();
         _settings.ApiKey = ApiKey.Text.Trim();
-        _settings.AdminApiKey = AdminApiKey.Text.Trim();
-        _settings.IsAdminMode = AdminMode.IsChecked == true;
         _settings.QuickBooksExePath = QBPath.Text.Trim();
         _settings.MultiFileMode = MultiFile.IsChecked == true;
         var pwd = ShowQBPassword.IsChecked == true ? QBPasswordVisible.Text : QBPassword.Password;

@@ -21,12 +21,6 @@
                 <Label Content="API Key (leave blank to disable auth in dev)"/>
                 <TextBox x:Name="ApiKey" Margin="0,0,0,12"/>
 
-                <Label Content="Admin API Key"/>
-                <TextBox x:Name="AdminApiKey" Margin="0,0,0,12"/>
-
-                <CheckBox x:Name="AdminMode" Content="Enable Admin Mode (shows Force Unlock)"
-                          Foreground="{StaticResource Text}" Margin="0,0,0,16"/>
-
                 <Separator Background="{StaticResource Border}" Margin="0,0,0,16"/>
 
                 <TextBlock Text="QuickBooks" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,8"/>

@@ -7,8 +7,6 @@ public class AppSettings
 
     public string LockServiceBaseUrl { get; set; } = "";
     public string ApiKey { get; set; } = "";
-    public string AdminApiKey { get; set; } = "";
-    public bool IsAdminMode { get; set; } = false;
 
     public string QuickBooksExePath { get; set; } =
         @"C:\Program Files\Intuit\QuickBooks 2024\QBW.EXE";

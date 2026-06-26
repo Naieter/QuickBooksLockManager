@@ -144,9 +144,8 @@
                 <Button Content="📋 Audit Log" Style="{StaticResource SecondaryButton}"
                         Command="{Binding ShowAuditLogCommand}" Margin="0,0,8,0"/>
 
-                <Button Content="⚡ Admin Force Unlock" Style="{StaticResource DangerButton}"
-                        Command="{Binding AdminForceUnlockCommand}"
-                        Visibility="{Binding IsAdminMode, Converter={StaticResource BoolVis}}"/>
+                <Button Content="⚡ Force Unlock" Style="{StaticResource DangerButton}"
+                        Command="{Binding AdminForceUnlockCommand}"/>
             </StackPanel>
 
             <!-- My Active Locks -->

@@ -16,11 +16,9 @@ public class AcquireResult
 public class LockServiceClient
 {
     private readonly HttpClient _http;
-    private readonly string _adminApiKey;
 
-    public LockServiceClient(string baseUrl, string apiKey, string adminApiKey, int timeoutSeconds = 10)
+    public LockServiceClient(string baseUrl, string apiKey, int timeoutSeconds = 10)
     {
-        _adminApiKey = adminApiKey;
         _http = new HttpClient
         {
             BaseAddress = new Uri(NormalizeUrl(baseUrl)),
@@ -121,11 +119,8 @@ public class LockServiceClient
     public async Task<(bool Success, string Message)> ForceReleaseAsync(
         string lockId, string adminUserName, string? reason, string? adminAppInstanceId = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/locks/force-release");
-        request.Headers.Add("X-Admin-Key", _adminApiKey);
-        request.Content = JsonContent.Create(new { lockId, adminUserName, reason, adminAppInstanceId });
-
-        var resp = await _http.SendAsync(request);
+        var resp = await _http.PostAsJsonAsync("api/locks/force-release",
+            new { lockId, adminUserName, reason, adminAppInstanceId });
         var body = await resp.Content.ReadFromJsonAsync<ReleaseResultDto>();
         var msg = body?.Message ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
         return (resp.IsSuccessStatusCode, msg);
