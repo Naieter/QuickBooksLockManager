@@ -143,9 +143,11 @@ Start-Process -FilePath $tgt
     private static Version? ParseVersion(string tag)
     {
         var s = tag.TrimStart('v', 'V');
-        // Pad to at least Major.Minor so Version.TryParse succeeds on "1.0" style tags
         if (!s.Contains('.')) s += ".0";
-        return Version.TryParse(s, out var v) ? v : null;
+        if (!Version.TryParse(s, out var v)) return null;
+        // Normalize to 4 components so GitHub 3-part tags (1.4.1 → revision=-1)
+        // compare correctly against 4-part assembly versions (1.4.1.0 → revision=0).
+        return new Version(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
     }
 
     // ── GitHub API response models ────────────────────────────────────────────
