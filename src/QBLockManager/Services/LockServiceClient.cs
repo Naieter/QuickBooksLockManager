@@ -126,8 +126,8 @@ public class LockServiceClient
         request.Content = JsonContent.Create(new { lockId, adminUserName, reason, adminAppInstanceId });
 
         var resp = await _http.SendAsync(request);
-        var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-        var msg = body?.GetValueOrDefault("message") ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
+        var body = await resp.Content.ReadFromJsonAsync<ReleaseResultDto>();
+        var msg = body?.Message ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
         return (resp.IsSuccessStatusCode, msg);
     }
 
@@ -150,6 +150,12 @@ public class LockServiceClient
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<List<AuditLogEntryDto>>() ?? new();
     }
+}
+
+public class ReleaseResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 public class PendingCommandDto
