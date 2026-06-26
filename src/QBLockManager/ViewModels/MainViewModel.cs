@@ -385,8 +385,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var holder = SelectedFile.CurrentLock;
         var warn = MessageBox.Show(
-            $"This will release the lock and close QuickBooks on {holder.MachineName}.\n\n{holder.UserName} has up to 20 seconds to save before QuickBooks closes. Any unsaved changes will be lost.\n\nContinue with force unlock?",
-            "Force Unlock — Admin Action", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            $"Do you want to kick this user to unlock the file?",
+            "Force Kick User", MessageBoxButton.YesNo, MessageBoxImage.Warning);
 
         if (warn != MessageBoxResult.Yes) return;
 
@@ -395,7 +395,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             $"Admin force unlock by {_settings.UserName} on {Environment.MachineName}",
             _appInstanceId);
 
-        MessageBox.Show(msg, ok ? "Force Unlock Completed" : "Force Unlock Failed",
+        MessageBox.Show(msg, ok ? "Force Kick Completed" : "Force Kick Failed",
             MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
 
         await RefreshAsync();
