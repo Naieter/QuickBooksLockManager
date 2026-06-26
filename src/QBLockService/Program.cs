@@ -135,7 +135,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", utc = DateTime.UtcNow }))
+var serviceVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+var serviceVersionStr = serviceVersion is { } v
+    ? (v.Build > 0 ? $"{v.Major}.{v.Minor}.{v.Build}" : $"{v.Major}.{v.Minor}")
+    : "unknown";
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", version = serviceVersionStr, utc = DateTime.UtcNow }))
    .WithName("Health");
 
 // GET /api/files/locks — all active locks (for displaying file status in the UI)

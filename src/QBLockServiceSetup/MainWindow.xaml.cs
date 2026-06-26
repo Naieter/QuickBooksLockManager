@@ -28,7 +28,21 @@ public partial class MainWindow : Window
         var svc = GetService();
         if (svc != null)
         {
-            SetBanner($"Service already installed — Status: {svc.Status}", "#166534", "#bbf7d0");
+            // Try to read the running service version from the installed exe
+            var installedVersion = "";
+            try
+            {
+                var exePath = Path.Combine(InstallDirBox.Text, "QBLockService.exe");
+                if (File.Exists(exePath))
+                {
+                    var fv = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+                    installedVersion = fv.FileVersion is { } ver
+                        ? $" — v{ver.TrimEnd('0').TrimEnd('.')}"
+                        : "";
+                }
+            }
+            catch { }
+            SetBanner($"Service installed{installedVersion} — Status: {svc.Status}", "#166534", "#bbf7d0");
             InstallButton.Content = "Update / Reinstall";
             UninstallButton.Visibility = Visibility.Visible;
 
@@ -105,11 +119,30 @@ public partial class MainWindow : Window
 
             // Stop service if running
             var svc = GetService();
-            if (svc?.Status == ServiceControllerStatus.Running)
+            if (svc != null && svc.Status != ServiceControllerStatus.Stopped)
             {
                 Log("Stopping existing service...");
-                svc.Stop();
-                svc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
+                try { svc.Stop(); } catch { }
+                svc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
+                Log("Service stopped. Waiting for process to exit...");
+
+                // SCM reports Stopped before the process fully exits.
+                // Wait for the actual process so the exe file isn't still locked.
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (DateTime.UtcNow < deadline)
+                {
+                    var procs = Process.GetProcessesByName("QBLockService");
+                    if (procs.Length == 0) break;
+                    foreach (var p in procs) try { p.Dispose(); } catch { }
+                    System.Threading.Thread.Sleep(300);
+                }
+
+                // Force-kill if it still hasn't exited
+                foreach (var p in Process.GetProcessesByName("QBLockService"))
+                {
+                    Log("Process still running — force killing...");
+                    try { p.Kill(); p.WaitForExit(3000); } catch { }
+                }
             }
 
             // Create directories
