@@ -122,7 +122,9 @@ public class LockServiceClient
         var resp = await _http.PostAsJsonAsync("api/locks/force-release",
             new { lockId, adminUserName, reason, adminAppInstanceId });
         var body = await resp.Content.ReadFromJsonAsync<ReleaseResultDto>();
-        var msg = body?.Message ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
+        var msg = !string.IsNullOrWhiteSpace(body?.Message)
+            ? body!.Message
+            : (resp.IsSuccessStatusCode ? "Done." : "Failed.");
         return (resp.IsSuccessStatusCode, msg);
     }
 
