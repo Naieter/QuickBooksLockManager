@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:QBLockManager.ViewModels"
         xmlns:conv="clr-namespace:QBLockManager.Converters"
-        Title="QuickBooks Lock Manager"
+        Title="{Binding AppVersion, StringFormat='QuickBooks Lock Manager {0}'}"
         Height="700" Width="1100"
         MinHeight="500" MinWidth="800"
         WindowStartupLocation="CenterScreen"
@@ -33,6 +33,9 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="QuickBooks Lock Manager" FontSize="16" FontWeight="Bold"
                                Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding AppVersion}" FontSize="11"
+                               Foreground="{StaticResource SubText}" VerticalAlignment="Center"
+                               Margin="6,2,0,0"/>
                     <Border Background="{Binding ServiceReachable, Converter={StaticResource AvailColor}}"
                             CornerRadius="10" Padding="8,2" Margin="16,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding ServiceStatus}" FontSize="11" Foreground="White"/>

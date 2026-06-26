@@ -34,6 +34,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public bool MultiFileMode => _settings.MultiFileMode;
 
+    public string AppVersion
+    {
+        get
+        {
+            var v = Services.UpdateChecker.CurrentVersion;
+            return $"v{v.Major}.{v.Minor}";
+        }
+    }
+
     public MainViewModel(AppSettings settings)
     {
         _settings = settings;
