@@ -410,6 +410,7 @@ public class LockService : ILockService
         foreach (var cmd in pending.Where(c =>
             c.Command == ClientCommandType.CloseQuickBooks &&
             c.InitiatorAppInstanceId != null &&
+            c.InitiatorAppInstanceId != c.AppInstanceId &&
             c.FileKey != null))
         {
             db.ClientCommands.Add(new ClientCommand
