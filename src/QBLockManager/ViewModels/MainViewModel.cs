@@ -39,7 +39,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         get
         {
             var v = Services.UpdateChecker.CurrentVersion;
-            return $"v{v.Major}.{v.Minor}";
+            return v.Build > 0 ? $"v{v.Major}.{v.Minor}.{v.Build}" : $"v{v.Major}.{v.Minor}";
         }
     }
 
@@ -460,6 +460,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             fileVm = Files.FirstOrDefault(f =>
                 f.FileKey.Equals(fileKey, StringComparison.OrdinalIgnoreCase)));
 
+        // Ask the admin whether they want to open the file now.
+        MessageBoxResult open = MessageBoxResult.No;
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            var fileName = fileVm?.FileName ?? "the file";
+            open = MessageBox.Show(
+                $"QuickBooks has been closed on the locked computer.\n\nWould you like to open {fileName} now?",
+                "Lock Released", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        });
+
+        if (open != MessageBoxResult.Yes) return;
+
         if (fileVm == null || !fileVm.ExistsLocally)
         {
             Application.Current.Dispatcher.Invoke(() =>
@@ -515,7 +527,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             Application.Current.Dispatcher.Invoke(() =>
-                StatusMessage = $"Auto-open failed: {ex.Message}");
+                StatusMessage = $"Error opening file: {ex.Message}");
         }
         finally
         {
