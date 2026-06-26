@@ -16,6 +16,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        if (v != null)
+            VersionText.Text = v.Build > 0 ? $"v{v.Major}.{v.Minor}.{v.Build}" : $"v{v.Major}.{v.Minor}";
         GenerateKeys_Click(this, null!);
         CheckCurrentInstall();
     }
@@ -39,8 +42,6 @@ public partial class MainWindow : Window
                     var root = doc.RootElement;
                     if (root.TryGetProperty("ApiKey", out var ak) && ak.GetString() is string a)
                         ApiKeyBox.Text = a;
-                    if (root.TryGetProperty("AdminApiKey", out var aak) && aak.GetString() is string aa)
-                        AdminKeyBox.Text = aa;
                     if (root.TryGetProperty("Urls", out var urls) && urls.GetString() is string u)
                     {
                         var port = u.Split(':').LastOrDefault()?.Trim('/') ?? "5100";
@@ -71,8 +72,7 @@ public partial class MainWindow : Window
 
     private void GenerateKeys_Click(object sender, RoutedEventArgs e)
     {
-        ApiKeyBox.Text   = GenerateKey();
-        AdminKeyBox.Text = GenerateKey();
+        ApiKeyBox.Text = GenerateKey();
     }
 
     private static string GenerateKey()
@@ -99,7 +99,6 @@ public partial class MainWindow : Window
         {
             var installDir  = InstallDirBox.Text.Trim();
             var apiKey      = ApiKeyBox.Text.Trim();
-            var adminKey    = AdminKeyBox.Text.Trim();
             var port        = PortBox.Text.Trim();
             var timeout     = int.Parse(TimeoutBox.Text.Trim());
             var dbPath      = Path.Combine(installDir, "data", "qblocks.db");
@@ -134,7 +133,6 @@ public partial class MainWindow : Window
                 AllowedHosts = "*",
                 Urls         = $"http://0.0.0.0:{port}",
                 ApiKey       = apiKey,
-                AdminApiKey  = adminKey,
                 Database     = new { Path = dbPath.Replace("\\", "/") },
                 LockSettings = new { TimeoutMinutes = timeout, StaleCheckIntervalSeconds = 60 }
             };
@@ -174,9 +172,8 @@ public partial class MainWindow : Window
             if (finalSvc?.Status == ServiceControllerStatus.Running)
             {
                 Log($"✓ Service running on port {port}.");
-                Log($"  API Key:       {apiKey}");
-                Log($"  Admin API Key: {adminKey}");
-                Log($"  Health check:  http://localhost:{port}/health");
+                Log($"  API Key:      {apiKey}");
+                Log($"  Health check: http://localhost:{port}/health");
                 SetBanner($"Installed successfully — listening on port {port}", "#166534", "#bbf7d0");
                 InstallButton.Content = "Update / Reinstall";
                 UninstallButton.Visibility = Visibility.Visible;
@@ -239,8 +236,6 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(ApiKeyBox.Text) || ApiKeyBox.Text.Length < 16)
         { MessageBox.Show("API Key must be at least 16 characters.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return false; }
-        if (string.IsNullOrWhiteSpace(AdminKeyBox.Text) || AdminKeyBox.Text.Length < 16)
-        { MessageBox.Show("Admin API Key must be at least 16 characters.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return false; }
         if (!int.TryParse(PortBox.Text, out var p) || p < 1024 || p > 65535)
         { MessageBox.Show("Port must be a number between 1024 and 65535.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning); return false; }
         if (string.IsNullOrWhiteSpace(InstallDirBox.Text))
