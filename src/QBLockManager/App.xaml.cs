@@ -14,7 +14,7 @@ public partial class App : Application
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Programs", "QBLockManager");
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
@@ -34,6 +34,18 @@ public partial class App : Application
         var settingsSvc = new SettingsService();
         var settings = settingsSvc.Load();
 
+        // Check for updates — only when running from the installed location.
+        var currentExe   = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
+        var installedExe = Path.Combine(InstallDir, "QBLockManager.exe");
+        if (currentExe.Equals(installedExe, StringComparison.OrdinalIgnoreCase))
+        {
+            if (await TryApplyUpdateAsync(settings, installedExe))
+            {
+                Current.Shutdown();
+                return;
+            }
+        }
+
         if (NeedsSetup(settings))
         {
             var wizard = new SetupWizardWindow();
@@ -46,6 +58,48 @@ public partial class App : Application
 
         var mainWindow = new MainWindow(settings);
         mainWindow.Show();
+    }
+
+    // Returns true if an update was downloaded and the updater process was launched.
+    // The caller must call Application.Current.Shutdown() when this returns true.
+    private static async Task<bool> TryApplyUpdateAsync(AppSettings settings, string installedExe)
+    {
+        var update = await Services.UpdateChecker.CheckAsync(settings.GitHubToken);
+        if (update == null) return false;
+
+        var sizeMb = update.SizeBytes / 1024 / 1024;
+        var prompt = MessageBox.Show(
+            $"QuickBooks Lock Manager {update.TagName} is available.\n\nInstall update now? (~{sizeMb} MB)",
+            "Update Available",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+        if (prompt != MessageBoxResult.Yes) return false;
+
+        var tempFile      = Path.Combine(Path.GetTempPath(), "QBLockManager_update.exe");
+        var progressWindow = new Views.UpdateProgressWindow(update.TagName);
+        progressWindow.Show();
+
+        try
+        {
+            var progress = new Progress<double>(v => progressWindow.SetProgress(v));
+            await Services.UpdateChecker.DownloadAsync(
+                update, tempFile, settings.GitHubToken, progress);
+
+            progressWindow.ForceClose();
+            Services.UpdateChecker.LaunchUpdater(installedExe, tempFile);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            progressWindow.ForceClose();
+            try { File.Delete(tempFile); } catch { }
+            MessageBox.Show(
+                $"Update download failed:\n\n{ex.Message}\n\nLaunching the current version.",
+                "Update Failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
     }
 
     // Returns true if installation was triggered and this process should exit.

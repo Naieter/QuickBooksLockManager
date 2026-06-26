@@ -92,11 +92,11 @@ public class LockServiceClient
                ?? new AcquireResult { Success = false, Status = "Error" };
     }
 
-    public async Task<bool> HeartbeatAsync(string lockId, string appInstanceId)
+    public async Task<bool> HeartbeatAsync(string lockId, string appInstanceId, DateTime? fileModifiedAtUtc = null)
     {
         try
         {
-            var resp = await _http.PostAsJsonAsync("api/locks/heartbeat", new { lockId, appInstanceId });
+            var resp = await _http.PostAsJsonAsync("api/locks/heartbeat", new { lockId, appInstanceId, fileModifiedAtUtc });
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -119,16 +119,27 @@ public class LockServiceClient
     }
 
     public async Task<(bool Success, string Message)> ForceReleaseAsync(
-        string lockId, string adminUserName, string? reason)
+        string lockId, string adminUserName, string? reason, string? adminAppInstanceId = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/locks/force-release");
         request.Headers.Add("X-Admin-Key", _adminApiKey);
-        request.Content = JsonContent.Create(new { lockId, adminUserName, reason });
+        request.Content = JsonContent.Create(new { lockId, adminUserName, reason, adminAppInstanceId });
 
         var resp = await _http.SendAsync(request);
         var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string>>();
         var msg = body?.GetValueOrDefault("message") ?? (resp.IsSuccessStatusCode ? "Done." : "Failed.");
         return (resp.IsSuccessStatusCode, msg);
+    }
+
+    public async Task<List<PendingCommandDto>> PollCommandsAsync(string appInstanceId)
+    {
+        try
+        {
+            var resp = await _http.PostAsJsonAsync("api/commands/poll", new { appInstanceId });
+            if (!resp.IsSuccessStatusCode) return new();
+            return await resp.Content.ReadFromJsonAsync<List<PendingCommandDto>>() ?? new();
+        }
+        catch { return new(); }
     }
 
     public async Task<List<AuditLogEntryDto>> GetAuditLogAsync(int limit = 100, string? fileKey = null)
@@ -139,6 +150,14 @@ public class LockServiceClient
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<List<AuditLogEntryDto>>() ?? new();
     }
+}
+
+public class PendingCommandDto
+{
+    public long CommandId { get; set; }
+    public string Command { get; set; } = string.Empty;
+    public string? FileKey { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
 }
 
 public class AuditLogEntryDto

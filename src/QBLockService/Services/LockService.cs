@@ -14,6 +14,7 @@ public interface ILockService
     Task<List<LockInfo>> GetMyLocksAsync(string appInstanceId);
     Task<List<AuditLogEntry>> GetAuditLogAsync(int limit, string? fileKey);
     Task ExpireStaleLocksAsync();
+    Task<List<PendingCommandDto>> PollAndAcknowledgeCommandsAsync(string appInstanceId);
 }
 
 public class LockService : ILockService
@@ -196,16 +197,20 @@ public class LockService : ILockService
 
         lock_.LastHeartbeatUtc = DateTime.UtcNow;
 
-        db.AuditLogs.Add(new AuditLog
+        if (req.FileModifiedAtUtc.HasValue)
         {
-            EventType = AuditEventType.HeartbeatReceived,
-            FileKey = lock_.FileKey,
-            FileName = lock_.FileName,
-            UserName = lock_.UserName,
-            MachineName = lock_.MachineName,
-            AppInstanceId = lock_.AppInstanceId,
-            LockId = lock_.LockId
-        });
+            db.AuditLogs.Add(new AuditLog
+            {
+                EventType = AuditEventType.FileModified,
+                FileKey = lock_.FileKey,
+                FileName = lock_.FileName,
+                UserName = lock_.UserName,
+                MachineName = lock_.MachineName,
+                AppInstanceId = lock_.AppInstanceId,
+                LockId = lock_.LockId,
+                Details = $"File saved at {req.FileModifiedAtUtc.Value:u}"
+            });
+        }
 
         await db.SaveChangesAsync();
         return new HeartbeatResult { Success = true, Message = "Heartbeat recorded." };
@@ -261,6 +266,8 @@ public class LockService : ILockService
             return new ReleaseResult { Success = false, Message = "Lock not found or already released." };
         }
 
+        var targetAppInstanceId = lock_.AppInstanceId;
+
         lock_.Status = LockStatus.ForceReleased;
         lock_.ReleasedAtUtc = DateTime.UtcNow;
         lock_.ReleasedReason = $"Force-released by {req.AdminUserName}. Reason: {req.Reason}";
@@ -274,13 +281,24 @@ public class LockService : ILockService
             MachineName = lock_.MachineName,
             AppInstanceId = lock_.AppInstanceId,
             LockId = lock_.LockId,
-            Details = $"Force-released by admin: {req.AdminUserName}. Reason: {req.Reason}. WARNING: The original user may still have the file open."
+            Details = $"Force-released by admin: {req.AdminUserName}. Reason: {req.Reason}. QuickBooks close command queued for {lock_.MachineName}."
+        });
+
+        // Queue a command to close QuickBooks on the workstation that holds the lock.
+        // InitiatorAppInstanceId lets the server queue an OpenFile command back to the admin
+        // once the target workstation acknowledges the close.
+        db.ClientCommands.Add(new ClientCommand
+        {
+            AppInstanceId = targetAppInstanceId,
+            Command = ClientCommandType.CloseQuickBooks,
+            FileKey = lock_.FileKey,
+            InitiatorAppInstanceId = req.AdminAppInstanceId
         });
 
         await db.SaveChangesAsync();
-        _logger.LogWarning("FORCE UNLOCK by {Admin}: LockId={LockId} FileKey={FileKey} OriginalUser={User}",
-            req.AdminUserName, req.LockId, lock_.FileKey, lock_.UserName);
-        return new ReleaseResult { Success = true, Message = $"Lock force-released. WARNING: {lock_.UserName} on {lock_.MachineName} may still have the file open." };
+        _logger.LogWarning("FORCE UNLOCK by {Admin}: LockId={LockId} FileKey={FileKey} OriginalUser={User} — CloseQuickBooks command queued for {AppInstanceId}",
+            req.AdminUserName, req.LockId, lock_.FileKey, lock_.UserName, targetAppInstanceId);
+        return new ReleaseResult { Success = true, Message = $"Lock force-released and QuickBooks close command sent to {lock_.MachineName}." };
     }
 
     public async Task<List<LockInfo>> GetAllLocksAsync()
@@ -370,6 +388,47 @@ public class LockService : ILockService
 
         if (stale.Count > 0)
             await db.SaveChangesAsync();
+    }
+
+    public async Task<List<PendingCommandDto>> PollAndAcknowledgeCommandsAsync(string appInstanceId)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+
+        var pending = await db.ClientCommands
+            .Where(c => c.AppInstanceId == appInstanceId && c.AcknowledgedAtUtc == null)
+            .OrderBy(c => c.CommandId)
+            .ToListAsync();
+
+        if (pending.Count == 0) return new();
+
+        var now = DateTime.UtcNow;
+        foreach (var cmd in pending)
+            cmd.AcknowledgedAtUtc = now;
+
+        // When the target workstation acknowledges a CloseQuickBooks command, queue an OpenFile
+        // command back to whoever triggered the force-release so they can auto-open the file.
+        foreach (var cmd in pending.Where(c =>
+            c.Command == ClientCommandType.CloseQuickBooks &&
+            c.InitiatorAppInstanceId != null &&
+            c.FileKey != null))
+        {
+            db.ClientCommands.Add(new ClientCommand
+            {
+                AppInstanceId = cmd.InitiatorAppInstanceId!,
+                Command = ClientCommandType.OpenFile,
+                FileKey = cmd.FileKey
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        return pending.Select(c => new PendingCommandDto
+        {
+            CommandId = c.CommandId,
+            Command = c.Command,
+            FileKey = c.FileKey,
+            CreatedAtUtc = c.CreatedAtUtc
+        }).ToList();
     }
 
     private static bool IsDuplicateKey(DbUpdateException ex)

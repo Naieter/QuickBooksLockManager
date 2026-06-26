@@ -100,6 +100,29 @@ using (var scope = app.Services.CreateScope())
         CREATE INDEX IF NOT EXISTS ""IX_AuditLogs_FileKey""
         ON ""AuditLogs"" (""FileKey"")");
 
+    await ctx.Database.ExecuteSqlRawAsync(@"
+        CREATE TABLE IF NOT EXISTS ""ClientCommands"" (
+            ""CommandId""               INTEGER NOT NULL CONSTRAINT ""PK_ClientCommands"" PRIMARY KEY AUTOINCREMENT,
+            ""AppInstanceId""           TEXT NOT NULL,
+            ""Command""                 TEXT NOT NULL,
+            ""FileKey""                 TEXT,
+            ""InitiatorAppInstanceId""  TEXT,
+            ""CreatedAtUtc""            TEXT NOT NULL DEFAULT (datetime('now')),
+            ""AcknowledgedAtUtc""       TEXT
+        )");
+
+    // Migration: add InitiatorAppInstanceId to existing ClientCommands tables that predate this column.
+    try
+    {
+        await ctx.Database.ExecuteSqlRawAsync(
+            @"ALTER TABLE ""ClientCommands"" ADD COLUMN ""InitiatorAppInstanceId"" TEXT");
+    }
+    catch { /* column already exists — safe to ignore */ }
+
+    await ctx.Database.ExecuteSqlRawAsync(@"
+        CREATE INDEX IF NOT EXISTS ""IX_ClientCommands_Pending""
+        ON ""ClientCommands"" (""AppInstanceId"") WHERE ""AcknowledgedAtUtc"" IS NULL");
+
     logger.LogInformation("Database schema ready.");
 }
 
@@ -194,6 +217,17 @@ app.MapPost("/api/locks/force-release", async (ForceReleaseRequest req, ILockSer
 })
 .WithName("ForceReleaseLock")
 .WithSummary("Admin-only: force-releases any active lock and writes an audit record.");
+
+// POST /api/commands/poll — returns and acknowledges pending commands for this app instance
+app.MapPost("/api/commands/poll", async (PollCommandsRequest req, ILockService svc) =>
+{
+    if (string.IsNullOrWhiteSpace(req.AppInstanceId))
+        return Results.BadRequest(new { error = "AppInstanceId is required." });
+    var commands = await svc.PollAndAcknowledgeCommandsAsync(req.AppInstanceId);
+    return Results.Ok(commands);
+})
+.WithName("PollCommands")
+.WithSummary("Returns and acknowledges pending commands for the given app instance.");
 
 // GET /api/audit?limit=100&fileKey=optional
 app.MapGet("/api/audit", async (ILockService svc, int limit = 100, string? fileKey = null) =>

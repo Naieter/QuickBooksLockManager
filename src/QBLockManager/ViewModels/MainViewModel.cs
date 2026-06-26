@@ -50,6 +50,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _heartbeat = new HeartbeatManager(_lockClient, _appInstanceId, settings.HeartbeatIntervalSeconds);
         _heartbeat.LockLost += OnLockLost;
+        _heartbeat.CloseRequested += () => _ = OnForceCloseRequestedAsync();
+        _heartbeat.OpenFileRequested += fileKey => _ = OnRemoteOpenFileRequestedAsync(fileKey);
 
         _refreshTimer = new System.Timers.Timer(30_000);
         _refreshTimer.Elapsed += async (_, _) => await RefreshAsync();
@@ -392,7 +394,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var (ok, msg) = await _lockClient.ForceReleaseAsync(
             holder.LockId, _settings.UserName,
-            $"Admin force unlock by {_settings.UserName} on {Environment.MachineName}");
+            $"Admin force unlock by {_settings.UserName} on {Environment.MachineName}",
+            _appInstanceId);
 
         MessageBox.Show(msg, ok ? "Force Unlock Completed" : "Force Unlock Failed",
             MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
@@ -424,6 +427,91 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             new SettingsService().Save(_settings);
             _ = RefreshAsync();
+        }
+    }
+
+    private async Task OnForceCloseRequestedAsync()
+    {
+        QuickBooksAutoLogin.ResetAttempts();
+        await _heartbeat.ReleaseAllAsync();
+        if (QuickBooksLauncher.IsQuickBooksRunning())
+            await QuickBooksLauncher.CloseQuickBooksAsync();
+        Application.Current.Dispatcher.Invoke(() =>
+            StatusMessage = "QuickBooks was closed by an administrator.");
+        await RefreshAsync();
+    }
+
+    private async Task OnRemoteOpenFileRequestedAsync(string fileKey)
+    {
+        // Refresh so we have the latest availability — the force-released lock should be gone.
+        await RefreshAsync();
+
+        CompanyFileViewModel? fileVm = null;
+        Application.Current.Dispatcher.Invoke(() =>
+            fileVm = Files.FirstOrDefault(f =>
+                f.FileKey.Equals(fileKey, StringComparison.OrdinalIgnoreCase)));
+
+        if (fileVm == null || !fileVm.ExistsLocally)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+                StatusMessage = "The force-unlocked file is not available on this workstation.");
+            return;
+        }
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            IsBusy = true;
+            StatusMessage = $"Opening {fileVm.FileName}...";
+        });
+
+        try
+        {
+            var result = await _lockClient.AcquireAsync(
+                fileVm.FileKey, fileVm.FileName, fileVm.LocalPath,
+                _settings.UserName, _settings.DisplayName, _settings.Email,
+                Environment.MachineName, _appInstanceId);
+
+            if (result.Status is not ("Acquired" or "AlreadyOwned") || result.Lock == null)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                    StatusMessage = $"Could not open {fileVm.FileName}: {result.Message}");
+                return;
+            }
+
+            _heartbeat.RegisterLock(new ActiveFileLock
+            {
+                LockId = result.Lock.LockId,
+                FileKey = fileVm.FileKey,
+                FileName = fileVm.FileName,
+                LocalPath = fileVm.LocalPath,
+                AcquiredAt = result.Lock.AcquiredAtUtc
+            });
+
+            var launch = QuickBooksLauncher.Launch(_settings.QuickBooksExePath, fileVm.LocalPath);
+            if (launch.Success)
+                QuickBooksAutoLogin.BeginAutoLogin(_settings.QuickBooksPassword);
+
+            if (!launch.Success)
+            {
+                await _lockClient.ReleaseAsync(result.Lock.LockId, _appInstanceId);
+                _heartbeat.UnregisterLock(result.Lock.LockId);
+                Application.Current.Dispatcher.Invoke(() =>
+                    StatusMessage = $"Lock acquired but QuickBooks failed to launch: {launch.Message}");
+                return;
+            }
+
+            Application.Current.Dispatcher.Invoke(() =>
+                StatusMessage = $"Opened {fileVm.FileName}.");
+        }
+        catch (Exception ex)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+                StatusMessage = $"Auto-open failed: {ex.Message}");
+        }
+        finally
+        {
+            Application.Current.Dispatcher.Invoke(() => IsBusy = false);
+            await RefreshAsync();
         }
     }
 

@@ -36,6 +36,9 @@ public class HeartbeatRequest
 
     [Required, MaxLength(100)]
     public string AppInstanceId { get; set; } = string.Empty;
+
+    // Set only when the QB company file's LastWriteTime has changed since the previous heartbeat.
+    public DateTime? FileModifiedAtUtc { get; set; }
 }
 
 public class ReleaseLockRequest
@@ -57,6 +60,10 @@ public class ForceReleaseRequest
 
     [MaxLength(500)]
     public string? Reason { get; set; }
+
+    // When set, an OpenFile command is queued back to this instance after the target closes QB.
+    [MaxLength(100)]
+    public string? AdminAppInstanceId { get; set; }
 }
 
 public class LockAcquireResult
@@ -94,6 +101,20 @@ public class ReleaseResult
 {
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
+}
+
+public class PollCommandsRequest
+{
+    [Required, MaxLength(100)]
+    public string AppInstanceId { get; set; } = string.Empty;
+}
+
+public class PendingCommandDto
+{
+    public long CommandId { get; set; }
+    public string Command { get; set; } = string.Empty;
+    public string? FileKey { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
 }
 
 public class AuditLogEntry

@@ -8,8 +8,7 @@ public static class AuditEventType
     public const string LockDenied = "LockDenied";
     public const string LockAlreadyOwned = "LockAlreadyOwned";
     public const string LockReleased = "LockReleased";
-    public const string HeartbeatReceived = "HeartbeatReceived";
-    public const string HeartbeatMissed = "HeartbeatMissed";
+    public const string FileModified = "FileModified";
     public const string LockMarkedStale = "LockMarkedStale";
     public const string StaleExpired = "StaleExpired";
     public const string ForceUnlock = "ForceUnlock";

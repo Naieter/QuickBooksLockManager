@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 
 namespace QBLockManager.Services;
 
@@ -17,10 +18,13 @@ public class HeartbeatManager : IDisposable
     private readonly string _appInstanceId;
     private readonly int _intervalSeconds;
     private readonly ConcurrentDictionary<string, ActiveFileLock> _activeLocks = new();
+    private readonly ConcurrentDictionary<string, DateTime> _lastWriteTimes = new();
     private readonly System.Timers.Timer _timer;
     private bool _disposed;
 
     public event Action<string>? LockLost;
+    public event Action? CloseRequested;
+    public event Action<string>? OpenFileRequested; // fileKey
 
     public IReadOnlyDictionary<string, ActiveFileLock> ActiveLocks => _activeLocks;
 
@@ -39,11 +43,15 @@ public class HeartbeatManager : IDisposable
     public void RegisterLock(ActiveFileLock fileLock)
     {
         _activeLocks[fileLock.LockId] = fileLock;
+        // Snapshot the current write time so the first heartbeat doesn't fire a false FileModified.
+        if (!string.IsNullOrEmpty(fileLock.LocalPath) && File.Exists(fileLock.LocalPath))
+            _lastWriteTimes[fileLock.LockId] = File.GetLastWriteTimeUtc(fileLock.LocalPath);
     }
 
     public void UnregisterLock(string lockId)
     {
         _activeLocks.TryRemove(lockId, out _);
+        _lastWriteTimes.TryRemove(lockId, out _);
     }
 
     public bool HasActiveLock(string fileKey)
@@ -56,12 +64,36 @@ public class HeartbeatManager : IDisposable
     {
         foreach (var (lockId, fileLock) in _activeLocks.ToList())
         {
-            var ok = await _client.HeartbeatAsync(lockId, _appInstanceId);
+            DateTime? fileModifiedAtUtc = null;
+
+            if (!string.IsNullOrEmpty(fileLock.LocalPath) && File.Exists(fileLock.LocalPath))
+            {
+                var currentWriteTime = File.GetLastWriteTimeUtc(fileLock.LocalPath);
+                _lastWriteTimes.TryGetValue(lockId, out var previousWriteTime);
+
+                if (currentWriteTime != previousWriteTime)
+                {
+                    fileModifiedAtUtc = currentWriteTime;
+                    _lastWriteTimes[lockId] = currentWriteTime;
+                }
+            }
+
+            var ok = await _client.HeartbeatAsync(lockId, _appInstanceId, fileModifiedAtUtc);
             if (!ok)
             {
                 // Heartbeat failed — lock may have expired on server
                 LockLost?.Invoke(lockId);
             }
+        }
+
+        // Check for commands queued by the server (e.g. admin force-close or auto-open).
+        var commands = await _client.PollCommandsAsync(_appInstanceId);
+        foreach (var cmd in commands)
+        {
+            if (cmd.Command == "CloseQuickBooks")
+                CloseRequested?.Invoke();
+            else if (cmd.Command == "OpenFile" && !string.IsNullOrEmpty(cmd.FileKey))
+                OpenFileRequested?.Invoke(cmd.FileKey);
         }
     }
 

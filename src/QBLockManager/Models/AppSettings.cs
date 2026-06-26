@@ -28,6 +28,10 @@ public class AppSettings
 
     public int HeartbeatIntervalSeconds { get; set; } = 20;
     public int ServiceTimeoutSeconds { get; set; } = 10;
+
+    // Optional: GitHub personal access token for update checks on private repos.
+    // Leave empty if the GitHub repo is public.
+    public string? GitHubToken { get; set; }
 }
 
 public class WatchedFolder

@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<ActiveLock> ActiveLocks => Set<ActiveLock>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<ClientCommand> ClientCommands => Set<ClientCommand>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
