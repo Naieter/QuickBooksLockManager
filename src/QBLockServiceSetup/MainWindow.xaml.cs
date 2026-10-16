@@ -6,12 +6,14 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
+using Microsoft.Win32;
 
 namespace QBLockServiceSetup;
 
 public partial class MainWindow : Window
 {
     private const string ServiceName = "QBLockService";
+    private string? _storedClientAddress;   // from an earlier install's appsettings.json
 
     public MainWindow()
     {
@@ -21,6 +23,24 @@ public partial class MainWindow : Window
             VersionText.Text = v.Build > 0 ? $"v{v.Major}.{v.Minor}.{v.Build}" : $"v{v.Major}.{v.Minor}";
         GenerateKeys_Click(this, null!);
         CheckCurrentInstall();
+        ClientAddressBox.Text = _storedClientAddress ?? "";
+        Loaded += async (_, _) => await FillPublicAddressAsync();
+    }
+
+    // Workstations connect through the public address, so look it up rather than guess a LAN IP.
+    private async Task FillPublicAddressAsync()
+    {
+        var shownBefore = ClientAddressBox.Text;
+        var detected = await ConnectionFile.DetectPublicAddressAsync(PortBox.Text.Trim());
+
+        if (ClientAddressBox.Text != shownBefore) return;   // the admin typed something meanwhile
+        var chosen = ConnectionFile.ChooseClientAddress(_storedClientAddress, detected);
+        ClientAddressBox.Text = chosen;
+
+        if (detected != null)
+            Log($"Detected this server's public address: {detected}  (edit it if workstations use a different one)");
+        else if (chosen.Length == 0)
+            Log("Couldn't detect this server's public address (no internet?). Enter the address workstations use.");
     }
 
     private void CheckCurrentInstall()
@@ -28,21 +48,23 @@ public partial class MainWindow : Window
         var svc = GetService();
         if (svc != null)
         {
-            // Try to read the running service version from the installed exe
-            var installedVersion = "";
+            // Version of the service on disk — NOT this installer's version (shown in the title).
+            Version? installed = null;
             try
             {
                 var exePath = Path.Combine(InstallDirBox.Text, "QBLockService.exe");
                 if (File.Exists(exePath))
-                {
-                    var fv = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
-                    installedVersion = fv.FileVersion is { } ver
-                        ? $" — v{ver.TrimEnd('0').TrimEnd('.')}"
-                        : "";
-                }
+                    Version.TryParse(FileVersionInfo.GetVersionInfo(exePath).FileVersion, out installed);
             }
             catch { }
-            SetBanner($"Service installed{installedVersion} — Status: {svc.Status}", "#166534", "#bbf7d0");
+
+            var installer = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            if (installed != null && installer != null && installed < installer)
+                SetBanner($"Service v{ShortVersion(installed)} is {svc.Status}. This installer has v{ShortVersion(installer)} — click Update / Reinstall to upgrade.",
+                    "#78350f", "#fde68a");
+            else
+                SetBanner($"Service installed{(installed != null ? $" — v{ShortVersion(installed)}" : "")} — Status: {svc.Status}",
+                    "#166534", "#bbf7d0");
             InstallButton.Content = "Update / Reinstall";
             UninstallButton.Visibility = Visibility.Visible;
 
@@ -67,6 +89,9 @@ public partial class MainWindow : Window
                     if (root.TryGetProperty("LockSettings", out var ls) &&
                         ls.TryGetProperty("TimeoutMinutes", out var tm))
                         TimeoutBox.Text = tm.GetInt32().ToString();
+                    if (root.TryGetProperty("ClientAddress", out var ca) &&
+                        ca.GetString() is { Length: > 0 } clientAddr)
+                        _storedClientAddress = clientAddr;
                 }
                 catch { }
             }
@@ -74,6 +99,53 @@ public partial class MainWindow : Window
         else
         {
             SetBanner("Not installed — enter settings and click Install.", "#1e3a5f", "#93c5fd");
+        }
+    }
+
+    private static string ShortVersion(Version v) =>
+        v.Build > 0 ? $"{v.Major}.{v.Minor}.{v.Build}" : $"{v.Major}.{v.Minor}";
+
+    // Saves qblm-connect.json from the key and "Clients connect to" address shown here.
+    private void Export_Click(object sender, RoutedEventArgs e)
+    {
+        var key = ApiKeyBox.Text.Trim();
+        if (key.Length < 16)
+        { MessageBox.Show("API Key must be at least 16 characters.", "Export Connection File", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+
+        var port = PortBox.Text.Trim();
+        if (!int.TryParse(port, out var p) || p < 1024 || p > 65535)
+        { MessageBox.Show("Port must be a number between 1024 and 65535.", "Export Connection File", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+
+        var url = ConnectionFile.NormalizeAddress(ClientAddressBox.Text, port);
+        if (url.Length == 0)
+        { MessageBox.Show("Enter the public address workstations use to reach this server. It couldn't be detected automatically.", "Export Connection File", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+
+        var dlg = new SaveFileDialog
+        {
+            Title = "Export Connection File",
+            FileName = "qblm-connect.json",
+            DefaultExt = ".json",
+            Filter = "Connection file (*.json)|*.json",
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        try
+        {
+            File.WriteAllText(dlg.FileName, ConnectionFile.ToJson(url, key));
+            ClientAddressBox.Text = url;   // show exactly what was exported
+            Log($"Exported connection file for {url}");
+            Log($"  -> {dlg.FileName}");
+            MessageBox.Show(
+                $"Saved for {url}:\n{dlg.FileName}\n\nThis file contains the server's access key, so treat it like a password.\n\n" +
+                "Put it in the shared QuickBooks folder under QBLockCert and workstations that can't reach the server will switch to it automatically, " +
+                "or drag it onto a workstation's Settings window.",
+                "Connection File Exported", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not save the file:\n{ex.Message}", "Export Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -166,6 +238,7 @@ public partial class MainWindow : Window
                 AllowedHosts = "*",
                 Urls         = $"http://0.0.0.0:{port}",
                 ApiKey       = apiKey,
+                ClientAddress = ConnectionFile.NormalizeAddress(ClientAddressBox.Text, port),  // remembered for Export; the service ignores it
                 Database     = new { Path = dbPath.Replace("\\", "/") },
                 LockSettings = new { TimeoutMinutes = timeout, StaleCheckIntervalSeconds = 60 }
             };

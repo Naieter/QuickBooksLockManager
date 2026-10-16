@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows;
 using Microsoft.Win32;
 using QBLockManager.Models;
+using QBLockManager.Services;
 
 namespace QBLockManager.Views;
 
@@ -83,6 +84,45 @@ public partial class SettingsWindow : Window
             QBPassword.Password = QBPasswordVisible.Text;
             QBPassword.Visibility = System.Windows.Visibility.Visible;
             QBPasswordVisible.Visibility = System.Windows.Visibility.Collapsed;
+        }
+    }
+
+    // Saves the URL and key currently shown above as qblm-connect.json. Opens in the shared
+    // QBLockCert folder when it exists, so publishing to every workstation is one click.
+    private void ExportProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var url = ServiceUrl.Text.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            MessageBox.Show("Enter the Lock Service URL first.", "Export Connection File",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var certFolder = SharedConnectionFile.FindFolder(_settings.WatchedFolders.Select(f => f.Path));
+        var dlg = new SaveFileDialog
+        {
+            Title = "Export Connection File",
+            FileName = SharedConnectionFile.FileName,
+            DefaultExt = ".json",
+            Filter = "Connection file (*.json)|*.json",
+            OverwritePrompt = true,
+            InitialDirectory = certFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        try
+        {
+            SharedConnectionFile.Write(dlg.FileName, url, ApiKey.Text);
+            MessageBox.Show(
+                $"Saved:\n{dlg.FileName}\n\nThis file contains the server's access key, so treat it like a password. " +
+                $"Placed in the shared QuickBooks folder under {SharedConnectionFile.FolderName}, workstations that can't reach the server switch to it automatically.",
+                "Connection File Exported", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not save the file:\n{ex.Message}", "Export Failed",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

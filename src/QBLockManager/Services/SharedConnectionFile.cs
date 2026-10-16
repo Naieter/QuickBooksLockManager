@@ -29,6 +29,30 @@ public static class SharedConnectionFile
         return null;
     }
 
+    // The QBLockCert folder under the first watched folder that has one, so an exported file
+    // can be saved straight where every workstation looks. Null if none exists yet.
+    public static string? FindFolder(IEnumerable<string> watchedFolders)
+    {
+        foreach (var folder in watchedFolders)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) continue;
+            var candidate = Path.Combine(DriveLetterResolver.Resolve(folder), FolderName);
+            if (Directory.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    // Writes a connection file in the same format Find reads and the drag-and-drop import accepts.
+    public static void Write(string path, string serverUrl, string apiKey)
+    {
+        var profile = new ConnectionProfile
+        {
+            ServerUrl = LockServiceClient.NormalizeUrl(serverUrl).TrimEnd('/'),
+            ApiKey = apiKey.Trim()
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     private static ConnectionProfile? TryRead(string path)
     {
         for (int attempt = 0; attempt < 3; attempt++)

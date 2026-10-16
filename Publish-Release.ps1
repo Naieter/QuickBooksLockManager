@@ -114,8 +114,16 @@ if ($AttachToExisting) {
     }
 } else {
     if (-not $Title) { $Title = $Tag }
-    & gh release create $Tag $Client $Setup --title $Title --notes $Notes
-    if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+    # Notes go through a file: Windows PowerShell 5.1 mangles double quotes inside native-command
+    # arguments, and gh then reads the loose words as files to upload.
+    $notesFile = Join-Path ([IO.Path]::GetTempPath()) "release-notes-$Tag.md"
+    [IO.File]::WriteAllText($notesFile, $Notes)
+    try {
+        & gh release create $Tag $Client $Setup --title $Title --notes-file $notesFile
+        if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+    } finally {
+        Remove-Item $notesFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # 5. Refuse to call it done unless the release really has both.

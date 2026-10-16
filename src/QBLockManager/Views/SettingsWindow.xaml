@@ -34,7 +34,12 @@
                 <TextBox x:Name="ServiceUrl" Margin="0,0,0,12"/>
 
                 <Label Content="API Key (leave blank to disable auth in dev)"/>
-                <TextBox x:Name="ApiKey" Margin="0,0,0,12"/>
+                <TextBox x:Name="ApiKey" Margin="0,0,0,8"/>
+
+                <Button Content="⬇ Export connection file…" Style="{StaticResource SecondaryButton}"
+                        HorizontalAlignment="Left" Margin="0,0,0,12"
+                        Click="ExportProfile_Click"
+                        ToolTip="Save the URL and key above as qblm-connect.json, to share with other workstations."/>
 
                 <Separator Background="{StaticResource Border}" Margin="0,0,0,16"/>
 
