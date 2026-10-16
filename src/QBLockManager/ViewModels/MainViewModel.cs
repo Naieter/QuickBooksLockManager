@@ -13,6 +13,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly AppSettings _settings;
     private readonly LockServiceClient _lockClient;
     private readonly FileScanner _scanner;
+    private readonly SharedFileLockStore _fileStore;
     private readonly HeartbeatManager _heartbeat;
     private readonly string _appInstanceId;
     private readonly System.Timers.Timer _refreshTimer;
@@ -22,8 +23,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _statusMessage = "Initializing...";
     [ObservableProperty] private string _serviceStatus = "Connecting...";
     [ObservableProperty] private bool _serviceReachable;
+    // True when a lock registry is available: the server, or the shared-folder backup file.
+    [ObservableProperty] private bool _canOpenFiles;
     [ObservableProperty] private string _filterText = string.Empty;
-    [ObservableProperty] private CompanyFileViewModel? _selectedFile;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RemoveStaleLockCommand))]
+    private CompanyFileViewModel? _selectedFile;
     [ObservableProperty] private ActiveLockViewModel? _selectedActiveLock;
     [ObservableProperty] private bool _isBusy;
     public bool IsShuttingDown { get; private set; }
@@ -53,7 +58,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _scanner = new FileScanner();
 
-        _heartbeat = new HeartbeatManager(_lockClient, _appInstanceId, settings.HeartbeatIntervalSeconds);
+        // Backup lock registry lives in the shared QB folder; resolved per call since the
+        // Google Drive letter can change while the app is running.
+        _fileStore = new SharedFileLockStore(() =>
+        {
+            var folder = _settings.WatchedFolders
+                .Select(f => f.Path)
+                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+            return folder == null ? null : DriveLetterResolver.Resolve(folder);
+        });
+
+        _heartbeat = new HeartbeatManager(_lockClient, _fileStore, _appInstanceId, settings.HeartbeatIntervalSeconds);
         _heartbeat.LockLost += OnLockLost;
         _heartbeat.CloseRequested += () => _ = OnForceCloseRequestedAsync();
         _heartbeat.OpenFileRequested += fileKey => _ = OnRemoteOpenFileRequestedAsync(fileKey);
@@ -77,22 +92,51 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             ServiceReachable = await _lockClient.IsReachableAsync();
+
+            // Server down (or rejecting our key): the admin may have published new settings.
+            if (!ServiceReachable && await TryAdoptSharedConnectionAsync())
+                ServiceReachable = await _lockClient.IsReachableAsync();
+
+            var backupAvailable = await Task.Run(() => _fileStore.IsAvailable);
+            CanOpenFiles = ServiceReachable || backupAvailable;
+
             ServiceStatus = ServiceReachable
                 ? $"Connected to {_settings.LockServiceBaseUrl}"
-                : "OFFLINE — file opening is blocked";
+                : backupAvailable
+                    ? $"OFFLINE — using shared-folder backup ({SharedFileLockStore.FileName})"
+                    : "OFFLINE — shared folder unavailable, file opening is blocked";
 
-            if (!ServiceReachable)
+            if (!ServiceReachable && !backupAvailable)
             {
-                StatusMessage = "The lock service is unavailable. To prevent conflicts, QuickBooks files cannot be opened through this app until the lock service is reachable. Reach out to Nathan";
+                StatusMessage = "The lock service is unavailable and the shared QuickBooks folder can't be reached, so there is no way to check who has a file open. File opening is blocked until one of them is back.";
                 return;
             }
 
-            // Scan local files
-            var scanned = _scanner.Scan(_settings);
+            // Scan local files off the UI thread — Google Drive / network mounts can
+            // block Directory calls for many seconds, which froze the window at startup.
+            var scanned = await Task.Run(() => _scanner.Scan(_settings));
 
-            // Overlay with lock info
-            var allLocks = await _lockClient.GetAllLocksAsync();
-            var lockByKey = allLocks.ToDictionary(l => l.FileKey, StringComparer.OrdinalIgnoreCase);
+            // Overlay with lock info: server is authoritative when reachable; the shared-folder
+            // file adds anything the server doesn't know (locks taken while it was down).
+            var fileLocks = await _fileStore.ReadAsync();
+            List<LockInfoDto> allLocks;
+            if (ServiceReachable)
+            {
+                allLocks = await _lockClient.GetAllLocksAsync();
+                foreach (var fl in fileLocks)
+                {
+                    bool known = allLocks.Any(l => l.LockId == fl.LockId ||
+                                                   l.FileKey.Equals(fl.FileKey, StringComparison.OrdinalIgnoreCase));
+                    if (!known) allLocks.Add(fl);
+                }
+            }
+            else
+            {
+                allLocks = fileLocks;
+            }
+            // One lock per file for display: a fresh lock beats a stale leftover for the same file.
+            var lockByKey = new Dictionary<string, LockInfoDto>(StringComparer.OrdinalIgnoreCase);
+            foreach (var l in allLocks.OrderBy(l => l.IsStale)) lockByKey.TryAdd(l.FileKey, l);
 
             Application.Current.Dispatcher.Invoke(() =>
             {
@@ -162,7 +206,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                                   ?? MyActiveLocks.FirstOrDefault();
             });
 
-            StatusMessage = $"Loaded {Files.Count} file(s). {MyActiveLocks.Count} lock(s) active.";
+            StatusMessage = $"Loaded {Files.Count} file(s). {MyActiveLocks.Count} lock(s) active."
+                          + (_connectionNotice == null ? "" : " " + _connectionNotice);
+            _connectionNotice = null;
         }
         catch (Exception ex)
         {
@@ -172,6 +218,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsBusy = false;
         }
+    }
+
+    private string? _connectionNotice;
+    private string? _failedProfileSignature;   // "url|key" of a published file whose server didn't answer
+    private DateTime _failedProfileAtUtc;
+
+    // The admin can publish new server settings in <shared QB folder>\QBLockCert\qblm-connect.json.
+    // Adopted only if that server answers with those credentials, so a typo in the file can't
+    // strand every workstation on a dead address. Returns true if the settings were switched.
+    private async Task<bool> TryAdoptSharedConnectionAsync()
+    {
+        var folders = _settings.WatchedFolders.Select(f => f.Path)
+            .Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        if (folders.Count == 0) return false;
+
+        var profile = await Task.Run(() => SharedConnectionFile.Find(folders));
+        if (profile == null) return false;
+
+        var url = LockServiceClient.NormalizeUrl(profile.ServerUrl).TrimEnd('/');
+        var key = (profile.ApiKey ?? "").Trim();
+        var current = LockServiceClient.NormalizeUrl(_settings.LockServiceBaseUrl).TrimEnd('/');
+        if (url.Equals(current, StringComparison.OrdinalIgnoreCase) && key == _settings.ApiKey)
+            return false; // same settings we already have — the server is simply down
+
+        // Don't hammer a published address that isn't answering; look again in two minutes.
+        var signature = url + "|" + key;
+        if (signature == _failedProfileSignature &&
+            DateTime.UtcNow - _failedProfileAtUtc < TimeSpan.FromMinutes(2))
+            return false;
+
+        if (!await LockServiceClient.TestConnectionAsync(url, key))
+        {
+            _failedProfileSignature = signature;
+            _failedProfileAtUtc = DateTime.UtcNow;
+            return false;
+        }
+
+        _settings.LockServiceBaseUrl = url;
+        _settings.ApiKey = key;
+        new SettingsService().Save(_settings);
+        ApplySettingsLive();
+        _connectionNotice = $"Switched to the new lock server ({url}) from the shared connection file.";
+        return true;
     }
 
     private async Task CheckQuickBooksAsync()
@@ -218,10 +307,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task OpenFileInternalAsync(CompanyFileViewModel fileVm, bool switchMode)
     {
-        if (!ServiceReachable)
+        if (!ServiceReachable && !_fileStore.IsAvailable)
         {
             MessageBox.Show(
-                "The lock service is unavailable. To prevent conflicts, QuickBooks files cannot be opened through this app until the lock service is reachable. Reach out to Nathan",
+                "The lock service is unavailable and the shared QuickBooks folder can't be reached, so there is no way to check who has this file open.\n\nFile opening is blocked until one of them is back.",
                 "Lock Service Unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -290,36 +379,85 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            var result = await _lockClient.AcquireAsync(
-                fileVm.FileKey, fileVm.FileName, fileVm.LocalPath,
-                _settings.UserName, _settings.DisplayName, _settings.Email,
-                Environment.MachineName, _appInstanceId);
-
-            if (result.Status == "Denied")
+            // The shared-folder file may hold a lock the server never saw (taken while it was
+            // down), so check it in both modes. Stale entries (no heartbeat for 5 min) are
+            // overridable, same as the server's own rule.
+            var fileLocks = await _fileStore.ReadAsync();
+            var foreign = fileLocks.FirstOrDefault(l =>
+                l.FileKey.Equals(fileVm.FileKey, StringComparison.OrdinalIgnoreCase) &&
+                l.AppInstanceId != _appInstanceId && !l.IsStale);
+            if (foreign != null)
             {
-                var holder = result.CurrentHolder;
                 MessageBox.Show(
-                    $"This QuickBooks file is currently in use by {holder?.UserName ?? "someone"} on {holder?.MachineName ?? "another computer"} since {holder?.AcquiredAtUtc:g}.",
+                    $"This QuickBooks file is currently in use by {foreign.UserName} on {foreign.MachineName} since {foreign.AcquiredAtUtc.ToLocalTime():g}.",
                     "File In Use", MessageBoxButton.OK, MessageBoxImage.Warning);
                 StatusMessage = $"Lock denied for {fileVm.FileName}.";
                 return;
             }
 
-            if (result.Status is not ("Acquired" or "AlreadyOwned") || result.Lock == null)
+            LockInfoDto lockInfo;
+            bool offlineOnly = !ServiceReachable;
+
+            if (ServiceReachable)
             {
-                MessageBox.Show($"Could not acquire lock: {result.Message}", "Lock Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                var result = await _lockClient.AcquireAsync(
+                    fileVm.FileKey, fileVm.FileName, fileVm.LocalPath,
+                    _settings.UserName, _settings.DisplayName, _settings.Email,
+                    Environment.MachineName, _appInstanceId);
+
+                if (result.Status == "Denied")
+                {
+                    var holder = result.CurrentHolder;
+                    MessageBox.Show(
+                        $"This QuickBooks file is currently in use by {holder?.UserName ?? "someone"} on {holder?.MachineName ?? "another computer"} since {holder?.AcquiredAtUtc:g}.",
+                        "File In Use", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    StatusMessage = $"Lock denied for {fileVm.FileName}.";
+                    return;
+                }
+
+                if (result.Status is not ("Acquired" or "AlreadyOwned") || result.Lock == null)
+                {
+                    MessageBox.Show($"Could not acquire lock: {result.Message}", "Lock Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                lockInfo = result.Lock;
             }
+            else
+            {
+                // Server down: the shared-folder file is the lock registry.
+                lockInfo = new LockInfoDto
+                {
+                    LockId = Guid.NewGuid().ToString("N"),
+                    FileKey = fileVm.FileKey,
+                    FileName = fileVm.FileName,
+                    UserName = _settings.UserName,
+                    DisplayName = _settings.DisplayName,
+                    MachineName = Environment.MachineName,
+                    LocalPath = fileVm.LocalPath,
+                    AppInstanceId = _appInstanceId,
+                    AcquiredAtUtc = DateTime.UtcNow,
+                    LastHeartbeatUtc = DateTime.UtcNow,
+                    Status = "Offline"
+                };
+            }
+
+            // Mirror into the shared folder in both modes, so a later server outage
+            // doesn't hide this lock from other machines.
+            lockInfo.AppInstanceId = _appInstanceId;
+            lockInfo.LastHeartbeatUtc = DateTime.UtcNow;
+            await _fileStore.UpsertAsync(lockInfo);
 
             // Register heartbeat BEFORE launching QB
             _heartbeat.RegisterLock(new ActiveFileLock
             {
-                LockId = result.Lock.LockId,
+                LockId = lockInfo.LockId,
                 FileKey = fileVm.FileKey,
                 FileName = fileVm.FileName,
                 LocalPath = fileVm.LocalPath,
-                AcquiredAt = result.Lock.AcquiredAtUtc
+                AcquiredAt = lockInfo.AcquiredAtUtc,
+                OfflineOnly = offlineOnly
             });
 
             var launch = QuickBooksLauncher.Launch(_settings.QuickBooksExePath, fileVm.LocalPath);
@@ -329,13 +467,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!launch.Success)
             {
                 // Launch failed — release the lock we just acquired
-                await _lockClient.ReleaseAsync(result.Lock.LockId, _appInstanceId);
-                _heartbeat.UnregisterLock(result.Lock.LockId);
+                await _heartbeat.ReleaseLockAsync(lockInfo.LockId);
                 MessageBox.Show(launch.Message, "Launch Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
-            StatusMessage = $"Opened {fileVm.FileName}. Lock active.";
+            StatusMessage = offlineOnly
+                ? $"Opened {fileVm.FileName}. Lock recorded in shared folder (server offline)."
+                : $"Opened {fileVm.FileName}. Lock active.";
             if (launch.ReusedExistingProcess)
             {
                 MessageBox.Show(launch.Message, "QuickBooks Running", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -367,8 +506,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         try
         {
-            var ok = await _lockClient.ReleaseAsync(SelectedActiveLock.LockId, _appInstanceId);
-            _heartbeat.UnregisterLock(SelectedActiveLock.LockId);
+            var ok = await _heartbeat.ReleaseLockAsync(SelectedActiveLock.LockId);
             StatusMessage = ok ? $"Lock released for {SelectedActiveLock.FileName}." : "Release failed.";
         }
         finally
@@ -384,6 +522,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedFile?.CurrentLock == null) return;
 
         var holder = SelectedFile.CurrentLock;
+
+        // A lock the server doesn't know about (taken while it was down, or we're offline now)
+        // can only be cleared from the shared-folder file — we can't close QB remotely.
+        if (!ServiceReachable || holder.Status == "Offline")
+        {
+            var warnOffline = MessageBox.Show(
+                $"The lock server is not available for this lock. This will remove {holder.UserName}'s lock from the shared folder, but it CANNOT close QuickBooks on {holder.MachineName}.\n\nMake sure they have actually closed the file before continuing.\n\nRemove the lock?",
+                "Force Kick User (offline)", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (warnOffline != MessageBoxResult.Yes) return;
+
+            await _fileStore.RemoveAsync(holder.LockId);
+            MessageBox.Show("Backup lock removed from the shared folder.", "Force Kick Completed",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            await RefreshAsync();
+            return;
+        }
+
         var warn = MessageBox.Show(
             $"Do you want to kick this user to unlock the file?",
             "Force Kick User", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -395,10 +550,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
             $"Admin force unlock by {_settings.UserName} on {Environment.MachineName}",
             _appInstanceId);
 
+        if (ok) await _fileStore.RemoveAsync(holder.LockId);
+
         MessageBox.Show(msg, ok ? "Force Kick Completed" : "Force Kick Failed",
             MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Error);
 
         await RefreshAsync();
+    }
+
+    private bool CanRemoveStaleLock() =>
+        SelectedFile is { Availability: FileAvailability.Stale, CurrentLock: not null };
+
+    // Clears a stale lock (no heartbeat for SharedFileLockStore.StaleAfter) without the
+    // "kick" semantics: nothing is sent to the holder's machine. Stale locks otherwise
+    // linger in the shared-folder file until someone opens that exact file.
+    [RelayCommand(CanExecute = nameof(CanRemoveStaleLock))]
+    public async Task RemoveStaleLockAsync()
+    {
+        var file = SelectedFile;
+        var stale = file?.CurrentLock;
+        if (file == null || stale == null || file.Availability != FileAvailability.Stale) return;
+
+        var idle = DateTime.UtcNow - stale.LastHeartbeatUtc;
+        var idleText = idle.TotalHours >= 1
+            ? $"{(int)idle.TotalHours} hour(s)"
+            : $"{Math.Max(1, (int)idle.TotalMinutes)} minute(s)";
+
+        var confirm = MessageBox.Show(
+            $"{stale.UserName}'s lock on {file.FileName} (computer {stale.MachineName}) has had no activity for {idleText}, so they are probably not using it.\n\nRemove this stale lock?\n\nMake sure {stale.UserName} is not still working in the file.",
+            "Remove Stale Lock", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        await _fileStore.RemoveAsync(stale.LockId);
+        await RefreshAsync();
+
+        // The server expires its own stale locks within a minute (and Open takes one over
+        // immediately), so it can still list this one for a moment after we cleared ours.
+        var stillListed = Files.Any(f =>
+            f.FileKey.Equals(file.FileKey, StringComparison.OrdinalIgnoreCase) &&
+            f.Availability == FileAvailability.Stale);
+        StatusMessage = stillListed
+            ? $"Removed the backup record for {file.FileName}. The server still lists it as stale and will clear it within a minute — or just click Open."
+            : $"Stale lock on {file.FileName} removed.";
     }
 
     [RelayCommand]
@@ -424,8 +617,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (window.ShowDialog() == true)
         {
             new SettingsService().Save(_settings);
+            ApplySettingsLive();
             _ = RefreshAsync();
         }
+    }
+
+    // Pushes settings that are baked into long-lived objects (HttpClient, timers)
+    // out to those objects immediately, so no restart is needed.
+    private void ApplySettingsLive()
+    {
+        _lockClient.UpdateConnection(_settings.LockServiceBaseUrl, _settings.ApiKey, _settings.ServiceTimeoutSeconds);
+        _heartbeat.UpdateInterval(_settings.HeartbeatIntervalSeconds);
+    }
+
+    // Applies a dropped qblm-connect.json file's server/key immediately.
+    public async Task ApplyConnectionProfileAsync(Models.ConnectionProfile profile)
+    {
+        _settings.LockServiceBaseUrl = profile.ServerUrl;
+        _settings.ApiKey = profile.ApiKey;
+        new SettingsService().Save(_settings);
+        ApplySettingsLive();
+        StatusMessage = "Connection settings updated.";
+        await RefreshAsync();
     }
 
     private async Task OnForceCloseRequestedAsync()
@@ -488,6 +701,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            result.Lock.AppInstanceId = _appInstanceId;
+            result.Lock.LastHeartbeatUtc = DateTime.UtcNow;
+            await _fileStore.UpsertAsync(result.Lock);
+
             _heartbeat.RegisterLock(new ActiveFileLock
             {
                 LockId = result.Lock.LockId,
@@ -503,8 +720,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (!launch.Success)
             {
-                await _lockClient.ReleaseAsync(result.Lock.LockId, _appInstanceId);
-                _heartbeat.UnregisterLock(result.Lock.LockId);
+                await _heartbeat.ReleaseLockAsync(result.Lock.LockId);
                 Application.Current.Dispatcher.Invoke(() =>
                     StatusMessage = $"Lock acquired but QuickBooks failed to launch: {launch.Message}");
                 return;
@@ -527,10 +743,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnLockLost(string lockId)
     {
+        // The server rejected the lock (expired or force-released) — drop the mirror too,
+        // so the shared-folder file doesn't keep blocking whoever the server handed it to.
         _heartbeat.UnregisterLock(lockId);
+        _ = _fileStore.RemoveAsync(lockId);
         Application.Current.Dispatcher.Invoke(() =>
         {
-            StatusMessage = $"WARNING: A lock heartbeat failed and the lock may have expired. Please verify your file status and re-acquire if needed.";
+            StatusMessage = $"WARNING: The server no longer recognizes your lock (it may have expired or been force-released). Please verify your file status and re-acquire if needed.";
         });
     }
 

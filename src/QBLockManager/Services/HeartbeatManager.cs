@@ -10,13 +10,15 @@ public class ActiveFileLock
     public string FileName { get; init; } = string.Empty;
     public string LocalPath { get; init; } = string.Empty;
     public DateTime AcquiredAt { get; init; } = DateTime.UtcNow;
+    // Acquired while the lock service was unreachable — lives only in the shared-folder file.
+    public bool OfflineOnly { get; init; }
 }
 
 public class HeartbeatManager : IDisposable
 {
     private readonly LockServiceClient _client;
+    private readonly SharedFileLockStore _fileStore;
     private readonly string _appInstanceId;
-    private readonly int _intervalSeconds;
     private readonly ConcurrentDictionary<string, ActiveFileLock> _activeLocks = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastWriteTimes = new();
     private readonly System.Timers.Timer _timer;
@@ -28,16 +30,23 @@ public class HeartbeatManager : IDisposable
 
     public IReadOnlyDictionary<string, ActiveFileLock> ActiveLocks => _activeLocks;
 
-    public HeartbeatManager(LockServiceClient client, string appInstanceId, int intervalSeconds = 20)
+    public HeartbeatManager(LockServiceClient client, SharedFileLockStore fileStore,
+        string appInstanceId, int intervalSeconds = 20)
     {
         _client = client;
+        _fileStore = fileStore;
         _appInstanceId = appInstanceId;
-        _intervalSeconds = intervalSeconds;
 
         _timer = new System.Timers.Timer(intervalSeconds * 1000);
         _timer.Elapsed += async (_, _) => await SendHeartbeatsAsync();
         _timer.AutoReset = true;
         _timer.Start();
+    }
+
+    // Applies a new heartbeat interval immediately — no app restart required.
+    public void UpdateInterval(int intervalSeconds)
+    {
+        _timer.Interval = intervalSeconds * 1000;
     }
 
     public void RegisterLock(ActiveFileLock fileLock)
@@ -60,10 +69,28 @@ public class HeartbeatManager : IDisposable
     public ActiveFileLock? GetLockForFile(string fileKey)
         => _activeLocks.Values.FirstOrDefault(l => l.FileKey.Equals(fileKey, StringComparison.OrdinalIgnoreCase));
 
+    // Releases one lock everywhere it lives: the server (if it knows it), the shared file,
+    // and the local registry. Returns whether the server accepted the release (true for
+    // offline-only locks, which the server never knew about).
+    public async Task<bool> ReleaseLockAsync(string lockId)
+    {
+        _activeLocks.TryGetValue(lockId, out var fileLock);
+        var ok = true;
+        if (fileLock is { OfflineOnly: false })
+            ok = await _client.ReleaseAsync(lockId, _appInstanceId);
+        await _fileStore.RemoveAsync(lockId);
+        UnregisterLock(lockId);
+        return ok;
+    }
+
     private async Task SendHeartbeatsAsync()
     {
-        foreach (var (lockId, fileLock) in _activeLocks.ToList())
+        var held = _activeLocks.ToList();
+
+        foreach (var (lockId, fileLock) in held)
         {
+            if (fileLock.OfflineOnly) continue; // the server doesn't know this lock
+
             DateTime? fileModifiedAtUtc = null;
 
             if (!string.IsNullOrEmpty(fileLock.LocalPath) && File.Exists(fileLock.LocalPath))
@@ -78,13 +105,14 @@ public class HeartbeatManager : IDisposable
                 }
             }
 
-            var ok = await _client.HeartbeatAsync(lockId, _appInstanceId, fileModifiedAtUtc);
-            if (!ok)
-            {
-                // Heartbeat failed — lock may have expired on server
+            // null = server unreachable: keep the lock, the shared file carries it meanwhile.
+            var result = await _client.HeartbeatAsync(lockId, _appInstanceId, fileModifiedAtUtc);
+            if (result == false)
                 LockLost?.Invoke(lockId);
-            }
         }
+
+        // Keep the shared-folder mirror fresh so other machines don't see our locks as stale.
+        await _fileStore.TouchAsync(held.Select(kv => kv.Key).ToList());
 
         // Check for commands queued by the server (e.g. admin force-close or auto-open).
         var commands = await _client.PollCommandsAsync(_appInstanceId);
@@ -100,10 +128,7 @@ public class HeartbeatManager : IDisposable
     public async Task ReleaseAllAsync()
     {
         foreach (var (lockId, _) in _activeLocks.ToList())
-        {
-            await _client.ReleaseAsync(lockId, _appInstanceId);
-            _activeLocks.TryRemove(lockId, out _);
-        }
+            await ReleaseLockAsync(lockId);
     }
 
     public void Dispose()

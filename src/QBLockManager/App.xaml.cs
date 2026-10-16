@@ -48,12 +48,35 @@ public partial class App : Application
 
         if (NeedsSetup(settings))
         {
-            var wizard = new SetupWizardWindow();
-            bool? result = wizard.ShowDialog();
-            if (result != true || wizard.ConfiguredSettings == null)
+            var profile = SettingsService.LoadConnectionProfile() ?? FindDroppedProfile().profile;
+            var firstRun = new FirstRunWindow(profile);
+            bool? result = firstRun.ShowDialog();
+            if (result != true || firstRun.ConfiguredSettings == null)
                 return;
 
-            settings = wizard.ConfiguredSettings;
+            settings = firstRun.ConfiguredSettings;
+        }
+        else
+        {
+            // Already set up — check well-known drop locations for a credential update from admin
+            var (profile, profilePath) = FindDroppedProfile();
+            if (profile != null &&
+                (profile.ServerUrl != settings.LockServiceBaseUrl || profile.ApiKey != settings.ApiKey))
+            {
+                var r = MessageBox.Show(
+                    "Your administrator has sent updated connection settings.\n\nApply them now?",
+                    "Updated Server Settings",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (r == MessageBoxResult.Yes)
+                {
+                    settings.LockServiceBaseUrl = profile.ServerUrl;
+                    settings.ApiKey = profile.ApiKey;
+                    settingsSvc.Save(settings);
+                }
+                // Delete either way — a declined or already-applied file must never
+                // resurface and re-prompt (or silently re-apply stale values) on a later launch.
+                try { File.Delete(profilePath!); } catch { }
+            }
         }
 
         var mainWindow = new MainWindow(settings);
@@ -134,6 +157,11 @@ public partial class App : Application
             Directory.CreateDirectory(InstallDir);
             File.Copy(currentExe, installedExe, overwrite: true);
 
+            // Carry the connection profile alongside the exe so the wizard can pre-fill it
+            var profileSrc = Path.Combine(Path.GetDirectoryName(currentExe)!, "qblm-connect.json");
+            if (File.Exists(profileSrc))
+                try { File.Copy(profileSrc, Path.Combine(InstallDir, "qblm-connect.json"), overwrite: true); } catch { }
+
             CreateShortcut(installedExe, InstallDir,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                     "QuickBooks Lock Manager.lnk"));
@@ -188,4 +216,30 @@ public partial class App : Application
         string.IsNullOrWhiteSpace(s.LockServiceBaseUrl) ||
         s.WatchedFolders.Count == 0 ||
         s.WatchedFolders.All(f => string.IsNullOrWhiteSpace(f.Path));
+
+    // Looks for qblm-connect.json in well-known drop locations (Desktop, Downloads, next to exe).
+    private static (ConnectionProfile? profile, string? path) FindDroppedProfile()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "qblm-connect.json"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "qblm-connect.json"),
+            Path.Combine(AppContext.BaseDirectory, "qblm-connect.json"),
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var json = File.ReadAllText(path);
+                var p = System.Text.Json.JsonSerializer.Deserialize<ConnectionProfile>(json,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (p != null && !string.IsNullOrWhiteSpace(p.ServerUrl))
+                    return (p, path);
+            }
+            catch { }
+        }
+        return (null, null);
+    }
 }

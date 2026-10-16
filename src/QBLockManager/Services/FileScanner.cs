@@ -8,11 +8,14 @@ public class FileScanner
     public List<CompanyFileEntry> Scan(AppSettings settings)
     {
         var results = new List<CompanyFileEntry>();
+        var resolvedSharedRoot = DriveLetterResolver.Resolve(settings.SharedRootPath);
 
         foreach (var folder in settings.WatchedFolders)
         {
-            if (string.IsNullOrWhiteSpace(folder.Path) || !Directory.Exists(folder.Path))
-                continue;
+            if (string.IsNullOrWhiteSpace(folder.Path)) continue;
+
+            var resolvedFolderPath = DriveLetterResolver.Resolve(folder.Path);
+            if (!Directory.Exists(resolvedFolderPath)) continue;
 
             var searchOption = folder.Recursive
                 ? SearchOption.AllDirectories
@@ -20,11 +23,11 @@ public class FileScanner
 
             try
             {
-                var files = Directory.GetFiles(folder.Path, "*.QBW", searchOption);
+                var files = Directory.GetFiles(resolvedFolderPath, "*.QBW", searchOption);
                 foreach (var filePath in files)
                 {
                     var info = new FileInfo(filePath);
-                    var fileKey = FileKeyService.ComputeFileKey(filePath, settings.SharedRootPath);
+                    var fileKey = FileKeyService.ComputeFileKey(filePath, resolvedSharedRoot);
 
                     // Deduplicate by fileKey
                     if (results.Any(r => r.FileKey.Equals(fileKey, StringComparison.OrdinalIgnoreCase)))

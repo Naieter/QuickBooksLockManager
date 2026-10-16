@@ -8,7 +8,10 @@
         MinHeight="500" MinWidth="800"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Background}"
-        Closing="Window_Closing">
+        Closing="Window_Closing"
+        AllowDrop="True"
+        DragEnter="Window_DragEnter"
+        Drop="Window_Drop">
 
     <Window.Resources>
         <conv:AvailabilityToColorConverter x:Key="AvailColor"/>
@@ -130,11 +133,11 @@
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8" HorizontalAlignment="Left">
                 <Button Content="▶ Open" Style="{StaticResource PrimaryButton}"
                         Command="{Binding OpenFileCommand}" Margin="0,0,8,0"
-                        IsEnabled="{Binding ServiceReachable}"/>
+                        IsEnabled="{Binding CanOpenFiles}"/>
 
                 <Button Content="⇄ Switch File" Style="{StaticResource SecondaryButton}"
                         Command="{Binding SwitchFileCommand}" Margin="0,0,8,0"
-                        IsEnabled="{Binding ServiceReachable}"/>
+                        IsEnabled="{Binding CanOpenFiles}"/>
 
                 <Button Content="+ Open Another" Style="{StaticResource SecondaryButton}"
                         Command="{Binding OpenAnotherCommand}" Margin="0,0,8,0"
@@ -143,6 +146,10 @@
 
                 <Button Content="📋 Audit Log" Style="{StaticResource SecondaryButton}"
                         Command="{Binding ShowAuditLogCommand}" Margin="0,0,8,0"/>
+
+                <Button Content="🧹 Remove Stale Lock" Style="{StaticResource SecondaryButton}"
+                        Command="{Binding RemoveStaleLockCommand}" Margin="0,0,8,0"
+                        ToolTip="Enabled when the selected file's lock is stale (no activity for 15+ minutes)."/>
 
                 <Button Content="⚡ Force Kick User" Style="{StaticResource DangerButton}"
                         Command="{Binding AdminForceUnlockCommand}"/>

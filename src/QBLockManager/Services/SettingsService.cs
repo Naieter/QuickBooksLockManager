@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using QBLockManager.Models;
 
+
 namespace QBLockManager.Services;
 
 public class SettingsService
@@ -53,5 +54,18 @@ public class SettingsService
         Directory.CreateDirectory(ConfigDir);
         var json = JsonSerializer.Serialize(settings, JsonOptions);
         File.WriteAllText(ConfigPath, json);
+    }
+
+    public static ConnectionProfile? LoadConnectionProfile()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "qblm-connect.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var json = File.ReadAllText(path);
+            var p = JsonSerializer.Deserialize<ConnectionProfile>(json, JsonOptions);
+            return p != null && !string.IsNullOrWhiteSpace(p.ServerUrl) ? p : null;
+        }
+        catch { return null; }
     }
 }

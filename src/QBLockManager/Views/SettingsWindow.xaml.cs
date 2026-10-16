@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using Microsoft.Win32;
 using QBLockManager.Models;
@@ -82,6 +83,70 @@ public partial class SettingsWindow : Window
             QBPassword.Password = QBPasswordVisible.Text;
             QBPassword.Visibility = System.Windows.Visibility.Visible;
             QBPasswordVisible.Visibility = System.Windows.Visibility.Collapsed;
+        }
+    }
+
+    private void DropZone_DragEnter(object sender, DragEventArgs e)
+    {
+        e.Effects = IsConnectionFileDrag(e) ? DragDropEffects.Copy : DragDropEffects.None;
+        DropZone.Background = e.Effects == DragDropEffects.Copy
+            ? (System.Windows.Media.Brush)FindResource("Accent")
+            : (System.Windows.Media.Brush)FindResource("Surface");
+        e.Handled = true;
+    }
+
+    private void DropZone_DragLeave(object sender, DragEventArgs e)
+    {
+        DropZone.Background = (System.Windows.Media.Brush)FindResource("Surface");
+    }
+
+    private void DropZone_Drop(object sender, DragEventArgs e)
+    {
+        DropZone.Background = (System.Windows.Media.Brush)FindResource("Surface");
+        if (!IsConnectionFileDrag(e)) return;
+        var path = ((string[])e.Data.GetData(DataFormats.FileDrop))[0];
+        ImportProfileFrom(path);
+    }
+
+    private void DropZone_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select Connection File",
+            Filter = "Connection file (qblm-connect.json)|qblm-connect.json|JSON files (*.json)|*.json",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+        };
+        if (dlg.ShowDialog() == true)
+            ImportProfileFrom(dlg.FileName);
+    }
+
+    private static bool IsConnectionFileDrag(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return false;
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+        return files.Length == 1 && files[0].EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ImportProfileFrom(string path)
+    {
+        try
+        {
+            var json = File.ReadAllText(path);
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var p = JsonSerializer.Deserialize<ConnectionProfile>(json, opts);
+            if (p == null || string.IsNullOrWhiteSpace(p.ServerUrl))
+            {
+                MessageBox.Show("That file doesn't contain valid connection settings.",
+                    "Import Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            ServiceUrl.Text = p.ServerUrl;
+            ApiKey.Text = p.ApiKey;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not read file:\n{ex.Message}",
+                "Import Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

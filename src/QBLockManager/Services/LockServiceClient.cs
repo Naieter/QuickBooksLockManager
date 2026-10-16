@@ -15,27 +15,58 @@ public class AcquireResult
 
 public class LockServiceClient
 {
-    private readonly HttpClient _http;
+    private HttpClient _http;
 
     public LockServiceClient(string baseUrl, string apiKey, int timeoutSeconds = 10)
     {
-        _http = new HttpClient
+        _http = BuildClient(baseUrl, apiKey, timeoutSeconds);
+    }
+
+    // Applies new connection settings immediately — no app restart required.
+    public void UpdateConnection(string baseUrl, string apiKey, int timeoutSeconds = 10)
+    {
+        var old = _http;
+        _http = BuildClient(baseUrl, apiKey, timeoutSeconds);
+        old.Dispose();
+    }
+
+    private static HttpClient BuildClient(string baseUrl, string apiKey, int timeoutSeconds)
+    {
+        var http = new HttpClient
         {
             BaseAddress = new Uri(NormalizeUrl(baseUrl)),
             Timeout = TimeSpan.FromSeconds(timeoutSeconds)
         };
 
         if (!string.IsNullOrWhiteSpace(apiKey))
-            _http.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
+
+        return http;
     }
 
-    private static string NormalizeUrl(string url)
+    public static string NormalizeUrl(string url)
     {
         url = url.Trim().TrimEnd('/');
         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             url = "http://" + url;
         return url + "/";
+    }
+
+    // Does this server answer, and accept this key? Uses a throwaway client so the live
+    // connection is untouched. Used to vet new settings before adopting them.
+    public static async Task<bool> TestConnectionAsync(string baseUrl, string apiKey, int timeoutSeconds = 5)
+    {
+        try
+        {
+            using var http = BuildClient(baseUrl, apiKey, timeoutSeconds);
+            var resp = await http.GetAsync("api/files/locks");
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public async Task<bool> IsReachableAsync()
@@ -90,16 +121,19 @@ public class LockServiceClient
                ?? new AcquireResult { Success = false, Status = "Error" };
     }
 
-    public async Task<bool> HeartbeatAsync(string lockId, string appInstanceId, DateTime? fileModifiedAtUtc = null)
+    // true = accepted, false = the server rejected the lock (expired/force-released),
+    // null = server unreachable or erroring — the lock is NOT known to be lost.
+    public async Task<bool?> HeartbeatAsync(string lockId, string appInstanceId, DateTime? fileModifiedAtUtc = null)
     {
         try
         {
             var resp = await _http.PostAsJsonAsync("api/locks/heartbeat", new { lockId, appInstanceId, fileModifiedAtUtc });
-            return resp.IsSuccessStatusCode;
+            if (resp.IsSuccessStatusCode) return true;
+            return (int)resp.StatusCode < 500 ? false : null;
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 
