@@ -106,7 +106,7 @@
             <TextBox   Grid.Row="2" Grid.Column="1" x:Name="InstallDirBox" Text="C:\QBLockService"/>
 
             <TextBlock Grid.Row="3" Grid.Column="0" Text="Lock Timeout (min)" Style="{StaticResource Label}"/>
-            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="TimeoutBox" Text="5"/>
+            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="TimeoutBox" Text="15"/>
         </Grid>
 
         <!-- Action buttons -->

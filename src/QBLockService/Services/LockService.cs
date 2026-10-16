@@ -34,7 +34,7 @@ public class LockService : ILockService
     }
 
     private int LockTimeoutMinutes =>
-        _config.GetValue<int>("LockSettings:TimeoutMinutes", 5);
+        _config.GetValue<int>("LockSettings:TimeoutMinutes", 15);
 
     public async Task<LockAcquireResult> AcquireAsync(AcquireLockRequest req)
     {
