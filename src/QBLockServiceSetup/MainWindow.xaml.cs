@@ -14,6 +14,7 @@ public partial class MainWindow : Window
 {
     private const string ServiceName = "QBLockService";
     private string? _storedClientAddress;   // from an earlier install's appsettings.json
+    private bool _initializing = true;      // ignore the checkbox's own change events while the window loads
 
     public MainWindow()
     {
@@ -25,6 +26,92 @@ public partial class MainWindow : Window
         CheckCurrentInstall();
         ClientAddressBox.Text = _storedClientAddress ?? "";
         Loaded += async (_, _) => await FillPublicAddressAsync();
+
+        // On if a task already exists, or the admin hasn't turned it off (the default is on).
+        AutoStartCheck.IsChecked = AutoStart.TaskExists() || AutoStart.PreferenceOn();
+        _initializing = false;
+    }
+
+    // ── System tray ──────────────────────────────────────────────────────────
+
+    public void ShowFromTray()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true; Topmost = false;   // come to the front even if another window has focus
+    }
+
+    public void ExportFromTray()
+    {
+        ShowFromTray();   // the export reads the key/port/address shown in this window
+        Export_Click(this, new RoutedEventArgs());
+    }
+
+    // Closing hides to the tray while there is a service to watch; with no service installed it
+    // really closes (and the process ends in OnClosed).
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!App.Exiting && LockServiceInfo.Status() != null)
+        {
+            e.Cancel = true;
+            Hide();
+            ((App)Application.Current).Tray?.NotifyHidden();
+            return;
+        }
+        base.OnClosing(e);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        ((App)Application.Current).ExitApplication();   // don't leave a windowless process behind
+    }
+
+    private void AutoStart_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        AutoStart.SetPreference(AutoStartCheck.IsChecked == true);
+        // Before the service is installed this is just a choice; Install applies it.
+        if (GetService() != null) ApplyAutoStart(InstallDirBox.Text.Trim());
+    }
+
+    // Makes the logon task match the checkbox, keeping a copy of this program next to the
+    // service for the task to run (so it still works after the downloaded file is deleted).
+    private void ApplyAutoStart(string installDir)
+    {
+        try
+        {
+            if (AutoStartCheck.IsChecked == true)
+            {
+                var exe = EnsureInstalledCopy(installDir);
+                if (exe == null) { Log("⚠ Couldn't locate this program to set up tray autostart."); return; }
+                var r = AutoStart.Enable(exe);
+                Log(r.Ok ? "✓ Will start in the tray when Windows starts."
+                         : $"⚠ Couldn't set up tray autostart: {r.Message}");
+            }
+            else
+            {
+                var r = AutoStart.Disable();
+                Log(r.Ok ? "Tray autostart turned off." : $"⚠ Couldn't turn off tray autostart: {r.Message}");
+            }
+        }
+        catch (Exception ex) { Log($"⚠ Tray autostart: {ex.Message}"); }
+    }
+
+    private string? EnsureInstalledCopy(string installDir)
+    {
+        var self = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(self)) return null;
+
+        var target = AutoStart.InstalledExe(installDir);
+        if (string.Equals(Path.GetFullPath(self), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+            return target;   // already running from there
+
+        Directory.CreateDirectory(installDir);
+        try { File.Copy(self, target, overwrite: true); Log("Copied this program next to the service for tray autostart."); }
+        catch (IOException) when (File.Exists(target)) { /* in use by a running copy: keep that one */ }
+        return target;
     }
 
     // Workstations connect through the public address, so look it up rather than guess a LAN IP.
@@ -274,6 +361,8 @@ public partial class MainWindow : Window
             RunSc($"start {ServiceName}");
             System.Threading.Thread.Sleep(2000);
 
+            ApplyAutoStart(installDir);
+
             var finalSvc = GetService();
             if (finalSvc?.Status == ServiceControllerStatus.Running)
             {
@@ -298,6 +387,7 @@ public partial class MainWindow : Window
         finally
         {
             InstallButton.IsEnabled = true;
+            ((App)Application.Current).Tray?.Refresh();   // the tray icon appears once the service exists
         }
     }
 
@@ -323,6 +413,7 @@ public partial class MainWindow : Window
             RunSc($"delete {ServiceName}");
             Log("Removing firewall rule...");
             RunNetsh($"advfirewall firewall delete rule name=\"QBLockService\"");
+            AutoStart.Disable();   // no service, nothing for the tray to watch
             Log("✓ Service removed.");
             SetBanner("Service uninstalled. Files remain in install directory.", "#1e3a5f", "#93c5fd");
             InstallButton.Content = "Install";
@@ -335,6 +426,7 @@ public partial class MainWindow : Window
         finally
         {
             UninstallButton.IsEnabled = true;
+            ((App)Application.Current).Tray?.Refresh();
         }
     }
 

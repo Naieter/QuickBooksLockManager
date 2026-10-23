@@ -14,17 +14,57 @@ public partial class App : Application
     private const string AssetName = "QBLockService-Setup.exe";
     private const string ApiUrl    = $"https://api.github.com/repos/{Repo}/releases/latest";
 
+    private MainWindow? _main;
+
+    internal TrayManager? Tray { get; private set; }
+
+    // True once the program is really going away (tray "Exit", a newer launch taking over, or
+    // Windows logging off) - the window then closes for real instead of hiding to the tray.
+    internal static bool Exiting { get; private set; }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        if (await TryApplyUpdateAsync())
+        // The tray icon keeps the process alive after the window is hidden or closed.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        SessionEnding += (_, _) => Exiting = true;   // never hold up a logoff by hiding to the tray
+
+        var trayLaunch = e.Args.Any(a => string.Equals(a, AutoStart.TrayArgument, StringComparison.OrdinalIgnoreCase));
+
+        if (!SingleInstance.TryBecomePrimary(trayLaunch, () => Dispatcher.BeginInvoke(ExitApplication)))
+        {
+            if (!trayLaunch)
+                MessageBox.Show("The server program is busy right now. Try again in a moment.",
+                    "QuickBooks Lock Service", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        // Automatic start at logon: only worth running if there is a service to show an icon for.
+        if (trayLaunch && LockServiceInfo.Status() == null)
         {
             Shutdown();
             return;
         }
 
-        new MainWindow().Show();
+        _main = new MainWindow();
+        MainWindow = _main;
+        Tray = new TrayManager(_main);
+
+        if (trayLaunch) return;   // start hidden in the tray; no update prompt at logon
+
+        _main.Show();
+        if (await TryApplyUpdateAsync())
+            ExitApplication();
+    }
+
+    internal void ExitApplication()
+    {
+        Exiting = true;
+        Tray?.Dispose();
+        Tray = null;
+        Shutdown();
     }
 
     private static async Task<bool> TryApplyUpdateAsync()

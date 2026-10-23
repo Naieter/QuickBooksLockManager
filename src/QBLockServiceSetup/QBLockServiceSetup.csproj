@@ -3,6 +3,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- WinForms only for the tray icon (NotifyIcon). -->
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>QBLockServiceSetup</RootNamespace>
@@ -10,12 +12,19 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>1.6.9</Version>
-    <AssemblyVersion>1.6.9.0</AssemblyVersion>
-    <FileVersion>1.6.9.0</FileVersion>
+    <Version>1.6.10</Version>
+    <AssemblyVersion>1.6.10.0</AssemblyVersion>
+    <FileVersion>1.6.10.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Keep WinForms/System.Drawing out of the implicit usings: they collide with WPF's
+         MessageBox, Color, Application... TrayManager refers to them by alias instead. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
   </ItemGroup>
   <ItemGroup>
     <!--
