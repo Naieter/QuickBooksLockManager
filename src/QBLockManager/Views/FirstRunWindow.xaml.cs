@@ -12,18 +12,30 @@ public partial class FirstRunWindow : Window
     private bool _allowClose = false;
     private string? _detectedQbExePath;
     private ConnectionProfile? _profile;
+    private readonly AppSettings? _existing;   // whatever is already configured; the wizard only adds to it
 
     public AppSettings? ConfiguredSettings { get; private set; }
 
-    public FirstRunWindow(ConnectionProfile? profile)
+    public FirstRunWindow(ConnectionProfile? profile, AppSettings? existing = null)
     {
         _profile = profile;
+        _existing = existing;
         InitializeComponent();
         Loaded += OnLoaded;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Start from what's already configured so an existing setup is confirmed, not retyped
+        // (and so Finish keeps it exactly as it was).
+        if (_existing != null)
+        {
+            var folder = _existing.WatchedFolders?.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.Path))?.Path;
+            if (folder != null) TxtQBFolder.Text = folder;
+            if (!string.IsNullOrWhiteSpace(_existing.LockServiceBaseUrl)) TxtServerUrl.Text = _existing.LockServiceBaseUrl;
+            if (!string.IsNullOrWhiteSpace(_existing.ApiKey)) TxtApiKey.Text = _existing.ApiKey;
+        }
+
         if (_profile != null)
         {
             BannerProfileLoaded.Visibility = Visibility.Visible;
@@ -143,23 +155,9 @@ public partial class FirstRunWindow : Window
         }
 
         var folder = TxtQBFolder.Text.Trim();
-        var settings = new AppSettings
-        {
-            SetupCompleted = true,
-            LockServiceBaseUrl = NormalizeServerUrl(serverUrl),
-            ApiKey = apiKey,
-            QuickBooksExePath = _detectedQbExePath ?? new AppSettings().QuickBooksExePath,
-            UserName = Environment.UserName,
-            DisplayName = FormatWindowsName(Environment.UserName),
-            SharedRootPath = folder,
-            MultiFileMode = false,
-            HeartbeatIntervalSeconds = 20,
-            ServiceTimeoutSeconds = 10,
-            WatchedFolders = new List<WatchedFolder>
-            {
-                new() { Path = folder, Recursive = false, Label = "QuickBooks Files" }
-            }
-        };
+        var settings = SettingsMerge.ForFirstRun(
+            _existing, NormalizeServerUrl(serverUrl), apiKey, folder, _detectedQbExePath,
+            Environment.UserName, FormatWindowsName(Environment.UserName));
 
         new SettingsService().Save(settings);
         ConfiguredSettings = settings;

@@ -34,22 +34,42 @@ public partial class App : Application
         var settingsSvc = new SettingsService();
         var settings = settingsSvc.Load();
 
+        // An unreadable settings file is never silently replaced by blank settings: Load kept a
+        // copy of the original, and this says so.
+        if (settingsSvc.LoadWarning is { } loadWarning)
+            MessageBox.Show(loadWarning, "QuickBooks Lock Manager — Settings",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+
+        // First run after an update: the QuickBooks path, file password, watched folders and shared
+        // root must come out exactly as they went in. Put back anything that doesn't match.
+        var restored = settingsSvc.ReconcileAfterUpdate(settings, Services.UpdateChecker.CurrentVersion);
+        if (restored.Count > 0)
+            MessageBox.Show(
+                "After updating, these settings didn't match what you had before the update, so they were put back:\n\n• "
+                + string.Join("\n• ", restored),
+                "QuickBooks Lock Manager — Settings Restored", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        // Configs written by the old installer have no SetupCompleted flag. If it is otherwise
+        // complete it's a working setup, not a new one (in memory only; nothing is rewritten here).
+        if (!settings.SetupCompleted && SettingsService.IsConfigured(settings))
+            settings.SetupCompleted = true;
+
         // Check for updates — only when running from the installed location.
         var currentExe   = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
         var installedExe = Path.Combine(InstallDir, "QBLockManager.exe");
         if (currentExe.Equals(installedExe, StringComparison.OrdinalIgnoreCase))
         {
-            if (await TryApplyUpdateAsync(settings, installedExe))
+            if (await TryApplyUpdateAsync(settingsSvc, settings, installedExe))
             {
                 Current.Shutdown();
                 return;
             }
         }
 
-        if (NeedsSetup(settings))
+        if (!SettingsService.IsConfigured(settings))
         {
             var profile = SettingsService.LoadConnectionProfile() ?? FindDroppedProfile().profile;
-            var firstRun = new FirstRunWindow(profile);
+            var firstRun = new FirstRunWindow(profile, settings);
             bool? result = firstRun.ShowDialog();
             if (result != true || firstRun.ConfiguredSettings == null)
                 return;
@@ -85,7 +105,7 @@ public partial class App : Application
 
     // Returns true if an update was downloaded and the updater process was launched.
     // The caller must call Application.Current.Shutdown() when this returns true.
-    private static async Task<bool> TryApplyUpdateAsync(AppSettings settings, string installedExe)
+    private static async Task<bool> TryApplyUpdateAsync(SettingsService settingsSvc, AppSettings settings, string installedExe)
     {
         var update = await Services.UpdateChecker.CheckAsync(settings.GitHubToken);
         if (update == null) return false;
@@ -97,6 +117,10 @@ public partial class App : Application
             MessageBoxButton.YesNo,
             MessageBoxImage.Information);
         if (prompt != MessageBoxResult.Yes) return false;
+
+        // Safety copy of the settings as they are right now, before anything is replaced. The new
+        // version checks against it on its first run (SettingsService.ReconcileAfterUpdate).
+        settingsSvc.BackupBeforeUpdate(update.Version);
 
         var tempFile      = Path.Combine(Path.GetTempPath(), "QBLockManager_update.exe");
         var progressWindow = new Views.UpdateProgressWindow(update.TagName);
@@ -210,12 +234,6 @@ public partial class App : Application
         }
         catch { }
     }
-
-    private static bool NeedsSetup(AppSettings s) =>
-        !s.SetupCompleted ||
-        string.IsNullOrWhiteSpace(s.LockServiceBaseUrl) ||
-        s.WatchedFolders.Count == 0 ||
-        s.WatchedFolders.All(f => string.IsNullOrWhiteSpace(f.Path));
 
     // Looks for qblm-connect.json in well-known drop locations (Desktop, Downloads, next to exe).
     private static (ConnectionProfile? profile, string? path) FindDroppedProfile()
